@@ -1,0 +1,12 @@
+{
+  "session_id": "20251210_171347",
+  "last_update": "2025-12-10T17:14:30.373671",
+  "discovery_progress": {
+    "last_processed_path": null,
+    "current_batch": 1,
+    "documents_discovered": 10,
+    "resume_cursor": null
+  },
+  "documents_discovered": 10,
+  "buffer_size": 0
+}

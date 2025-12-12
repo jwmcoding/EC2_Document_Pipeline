@@ -1,0 +1,64 @@
+File: Signed VSP_BrightEdge_Order.pdf
+Document ID: ContentVersion/0680y0000035XZBAA2
+Client: Vision Service Plan
+Vendor: BrightEdge
+Deal: Deal-37461
+Chunks: 19
+============================================================
+
+--- Chunk 0 ---
+## BRIGHTEDGE ## Order Form BrightEdge Technologies, Inc. 989 E. Hillsdale Blvd, Suite 300 Foster City, CA 94404 Order Form for Vision Service Plan Offer Valid Through: April 21, 2017 Quotation by: Robert Lim USA Quote Number: Q031935.2 This Order Form is for the purchase of BrightEdge products and services set forth below.
+
+--- Chunk 1 ---
+Provision of all products and services set forth herein is subject to the Master Subscription Agreement between BrightEdge and Vision Service Plan dated April 19, 2017 (the "Agreement"). All capitalized terms used but not defined in this Order Form shall have the meanings given to them in the Agreement. In the event of a conflict between this Order Form and the Agreement, the Order Form shall prevail.
+
+--- Chunk 2 ---
+| Contract Period and Payment Terms Subscription Start Date: April 24, 2017 | Order Form Effective Date: On Last Signature Date Billing Frequency: Annual Payment Terms: Net 45 First Invoice Date: On Last Signature Date | |-----------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------| | Customer: Vision Service Plan Main Contact: | Bill To: Michelle Kuret Vision Service Plan Marketing Analytics Specialist | ## Subscription Charges for Subscription Term | Category | Description | Description | Quantity | Total List Price | |--------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------|--------------------| | BrightEdge S3 Base Platform | Base Platform - Subscription Includes: - Story Builder, Reports, Recommendations, Page Manager, Data Cube, Share of Voice, Opportunity Forecasting, Tasks.
+
+--- Chunk 3 ---
+- Unlimited Keyword Groups. | Base Platform - Subscription Includes: - Story Builder, Reports, Recommendations, Page Manager, Data Cube, Share of Voice, Opportunity Forecasting, Tasks. - Unlimited Keyword Groups. | 1 | | | BrightEdge S3 Base Platform | - Unlimited Users. Base Platform - Keywords Keywords can be allocated to any supported location and device (see notes for details).
+
+--- Chunk 4 ---
+With Off-Page Recommendations for 10% Keywords. | - Unlimited Users. Base Platform - Keywords Keywords can be allocated to any supported location and device (see notes for details). With Off-Page Recommendations for 10% Keywords.
+
+--- Chunk 5 ---
+With Off-Page Recommendations for 10% Keywords. | 1000 | | | BrightEdge S3 Base Platform | Base Platform - Competitors | Base Platform - Competitors | 12 | | | BrightEdge S3 Base Platform | Base Platform - Domains | Base Platform - Domains | 1 | | | Site Audit | Pages with Site Audit - Subscription Site Audit requires an external sitemap for each account. The pages listed first in the sitemap will be analyzed, regardless of whether they are in Page Manager.
+
+--- Chunk 6 ---
+Quantity of pages is total across all the accounts, not per account. | Pages with Site Audit - Subscription Site Audit requires an external sitemap for each account. The pages listed first in the sitemap will be analyzed, regardless of whether they are in Page Manager.
+
+--- Chunk 7 ---
+Quantity of pages is total across all the accounts, not per account. | 10000 | | | Connect - Google Analytics API Integration | Google Analytics API Integration Subscription Maps one Google Analytics profile with one BrightEdge account. Includes Traffic metrics, Page Reporting, E-Commerce and Conversion Goal Metrics (if available).
+
+--- Chunk 8 ---
+Number of pages tracked in Page Reporting equals number of keywords tracked in platform. | Google Analytics API Integration Subscription Maps one Google Analytics profile with one BrightEdge account. Includes Traffic metrics, Page Reporting, E-Commerce and Conversion Goal Metrics (if available).
+
+--- Chunk 9 ---
+Number of pages tracked in Page Reporting equals number of keywords tracked in platform.
+
+--- Chunk 10 ---
+| 1 | | | Client Services | Dedicated Customer Success | Dedicated Customer Success | 1 | | | | | Total Subscription List Price | Total Subscription List Price | $60,000.00 | | | | Discount for order closing on or prior to April | Discount for order closing on or prior to April | - $24,000.00 | | | | Total Subscription Price After Discounts | Total Subscription Price After Discounts | $36,000.00 | &lt;unknown&gt; ## BRIGHTEDGE ## Setup, Configuration, and One-Time Charges Order Form | Category | Description | Description | Quantity | One-Time List Price | |--------------------------------------------|--------------------------------------------|----------------------------------------------------------|----------------------------------------------------------|-----------------------| | Connect - Google Analytics API Integration | Google Analytics API Integration Setup Fee | Google Analytics API Integration Setup Fee | 1 | $500.00 | | | | Total One-Time List Price | Total One-Time List Price | $500.00 | | | | Discount for order closing on or prior to April 21, 2017 | Discount for order closing on or prior to April 21, 2017 | - $500.00 | | | | Total One-Time Price After Discounts | Total One-Time Price After Discounts | $0.00 | ## Notes: - Please use electronic signature or email scanned copy with signature to rlim@brightedge.
+
+--- Chunk 11 ---
+com. - "Domain" refers to a single website tracked in BrightEdge - for example, domain. com, shop.domain.com, or domain. com/fr - or a separate microsite. - "Location" refers to one country or one city supported by BrightEdge -for example, "United States", "France", "San Francisco, CA", or "London". - "Device" refers to one of Desktop, Tablet, or Smartphone.
+
+--- Chunk 12 ---
+- Each domain, location, and device is counted separately for keyword purposes, as per below. - -For the purposes of counting keywords in Customer's account, unless an existing agreement between C ustomer and BrightEdge provides otherwise, any combination of keyword, location and device is counted separately regardless of keyword duplicates across accounts, locations, or devices.
+
+--- Chunk 13 ---
+For the avoidance of doubt, in each of the following examples, keyword count will be two (2) distinct keywords when the same spelled keyword is tracked on: 1) Google UK Desktops and Google France Desktops, 2) Google US Desktops and Google US Smartphones; 3) Google New York Desktops and Google San Francisco Desktops; or 4) Google US Desktops and Bing US Desktops.
+
+--- Chunk 14 ---
+- -Within the limits of Customer's subscriptions - and except for premium locations such as China - Customer can allocate keywords to any location and/or device supported by BrightEdge. For example, in a 100 keywords account, at any time the Customer can allocate 50 keywords to USSmartphone and 50 keywords to UK-Desktop. NOTE: all historical information for a given keyword, location, and device combination will be deleted when that combination is no longer tracked for the Customer.
+
+--- Chunk 15 ---
+- For the purposes of counting competitors in a Customer account, each competitor associated with any given domain is counted separately regardless of duplicate competitor names across domains. For avoidance of doubt, as an example, the same competitor tracked for both "domain. com" as well as for "domain. com/fr" is counted as two separate competitors.
+
+--- Chunk 16 ---
+com" as well as for "domain. com/fr" is counted as two separate competitors. - -'Customer Success' includes: BrightEdge Ignite Onboarding during initial day of the subscription and up to forty five (45) da y period starting on the Subscription Start Date; Provisioning of new Customer account within 48 hours after Subscription Start Date for up 5 domains; Schedule of provisioning of additional Customer domains above first 5 shall be provided after review of Customer account; Ignite Onboarding includes up to six (6) hours of 1 x 1 support for Customer onboarding, training and integrations; BrightEdge Ignite Onboarding Team available via phone and email 8am to 5pm, Monday through Friday; After Customer completion of Ignite Onboarding, Customer access to dedicated Client Services Manager via phone 8am to 5pm PDT or GMT for Europe-based customers (unless specified differently in this order form), Monday through Friday; Dedicated Client Services Manager shall provide day-to-day management of training, usage, and Customer support to realize success on the BrightEdge platform.
+
+--- Chunk 17 ---
+BrightEdge Technical Support available during and after onboarding via email 8am to 5pm PDT or GMT for Europe-based customers (unless specified differently in this order form), Monday through Friday; - -Notwithstanding anything to the contrary in the Agreement, all references in this Order Form to '$' shall mean United States dollars. Accepted and agreed to as of the Effective Date by the authorized representative of each party.
+
+--- Chunk 18 ---
+<!-- image --> ## Vision Service Plan BrightEdge Technologies, Inc. Signature: Signature: Print Name: Print Name: Print Title: Print Title: Signature Date: Signature Date: 4/20/2017 | 11:51:35 AM PDT VP of Legal June Ko 4/20/2017 | 8:08:39 PM PDT Executive Greg Tennyson DocuSignedby: GveS fennysou 52B467C595E645D DocuSignedby: 025FFEA61E3243E. . <!-- image -->

@@ -1,0 +1,37 @@
+File: RE Trace 3 Proposal Clarifications.msg
+Document ID: ContentVersion/0680y0000035Y5NAAU
+Client: Webster Bank
+Vendor: Thales
+Deal: Deal-37471
+Chunks: 10
+============================================================
+
+--- Chunk 0 ---
+Subject: RE: Trace 3 Proposal Clarifications To: Wentland, Robert P. <RWentland@WebsterBank.com> --- Email Body --- From: Wentland, Robert P. [mailto:RWentland@WebsterBank.com] Sent: Thursday, March 8, 2018 5:16 PM To: Gregg Spivack <gspivack@npifinancial. com> Subject: FW: Trace 3 Proposal Clarifications Gregg, Attached is the updated quote with more detail.
+
+--- Chunk 1 ---
+Thanks, Robert Wentland, VP, Strategic Sourcing Manager, Procurement Webster Bank · 145 Bank Street · Mail Stop MO-415 · Waterbury, CT 06702 office: (203) 578-2642 · email: rwentland@websterbank. com <mailto:rwentland@websterbank.com> From: Jay Antonellis [mailto:jantonellis@trace3.com <mailto:jantonellis@trace3.com> ] Sent: Thursday, March 08, 2018 5:14 PM To: Sim, Karen; Wentland, Robert P. ; Miller, James S. ; Stott, Thomas; Lombardi, Anthony D.
+
+--- Chunk 2 ---
+; Miller, James S. ; Stott, Thomas; Lombardi, Anthony D. Cc: David Phillips; Tim Benner Subject: [EXTERNAL] Re: Trace 3 Proposal Clarifications Hi Webster team,
+
+--- Chunk 3 ---
+As promised, attached is the Product Quote along with the breakdown of services.
+
+--- Chunk 4 ---
+We would like to contract for the majority of the work as Fixed Bid (much like the AppD deployment)  including: * Program Review and Roadmap Development - $51,800 * Includes Security Architect * PM * Product Install - $12,500 * Leveraging Vendor Provided SMEs * Technology Design & Implementation - $67,500 * Includes Principal Security Architect * Security Engineer * PM Roadmap Mentoring Support  we believe this should be T&M so that you only pay for what you use.
+
+--- Chunk 5 ---
+Estimated need: $51,800 * Principal Security Architect 160 hrs x $300/hr = $48,000 * PM 19 hrs x $200 = $3,800 Please let me know if you need any additional detail.
+
+--- Chunk 6 ---
+Of course, the SOW will provide a much deeper commitment of deliverables, timelines, etc. Jay Antonellis Trace3 857.891.1481 ________________________________ PRIVILEGED AND CONFIDENTIAL: Communications sent from Webster Financial Corporation, and our affiliates and subsidiaries, which contain sensitive information, will be sent via encrypted email.
+
+--- Chunk 7 ---
+Affiliates and subsidiaries of Webster Financial Corporation include: Webster Bank (Including its divisions: HSA Bank, Webster Investment Services, and Webster Private Bank), Webster Business Credit Corporation, Webster Capital Finance, and Webster Wealth Advisors . This communication, including attachments, is for the exclusive use of addressee and may contain proprietary, confidential, or privileged information.
+
+--- Chunk 8 ---
+If you are not the intended recipient, any use, copying, disclosure, dissemination, or distribution is strictly prohibited. If you are not the intended recipient, please notify the sender immediately by return email and delete this communication and destroy all copies. Rates and program criteria are subject to change. All loans are subject to credit approval. Other terms and conditions may apply; consult a Webster representative for more details.
+
+--- Chunk 9 ---
+To opt-out of receiving email advertisements please call 1-800-325-2424. Webster Corporate Headquarters - 145 Bank Street SO120 Waterbury, CT 06702 Webster Bank, N. A - Equal Housing Lender

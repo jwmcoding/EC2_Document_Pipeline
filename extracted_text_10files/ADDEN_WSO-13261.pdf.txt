@@ -1,0 +1,52 @@
+File: ADDEN WSO-13261.pdf
+Document ID: ContentVersion/0680y0000035WsRAAU
+Client: American Family Insurance
+Vendor: WSO2
+Deal: Deal-35928
+Chunks: 15
+============================================================
+
+--- Chunk 0 ---
+<!-- image --> <! -- image --> <! -- image --> VPSILES Title nie 3/24/2017 3/24/201 Dste "Record" means any recorded information used by Amenican Family that has value to American Family for conducting its business or meeting lls legal obligations. This Includes intormation created or received in any fomm. induding e·mails, paper documents, electronic documents, data base or appllcalion infomatlon, and other electronicorphotographicmedia.
+
+--- Chunk 1 ---
+"Security Breach" means any Securty Incident in which sensilive, protected or confidentiat dath is copied. transmited, viewed, stolen or used by an individual unauthorized to do so. Sensilive data may include credit card or bank details. personal health informatlon (PHi), personally identifiable information (Pil), trade secrels or Intellectual property.
+
+--- Chunk 2 ---
+"Security Incident" means the confiumed access to American Family Information that was unauthorized Incidents include,but are not limited lo, Infommalion system falures and loss of service, denial of service, errors resulting from incomplete or lnaccurate business data, and breaches of confdentlality.
+
+--- Chunk 3 ---
+Selurlty incidents will be considered confidential and will be treated In accordanco with the confidentiaity requiremenls of this Agreement, except notice to American Family Personnel, American Famlly dustomers, "Security Vulnerability" means a weakness at the network services, operaling system, or application tevel. , or within associated functians of networks. computer syslems,or Sontware that coulkd allow a Securilty pernitting access to American Famlly Informalion.
+
+--- Chunk 4 ---
+"sontware" means compuler sotware and related documentation thal may be the rcason for ihis Agreement,or if none, compuler programs consisting of a senies of lnstructions, algorthms, lines pf code. informationandmodificationsof suchdocumenialion. "Company" means the undersigned Company, vendor, or other business parner defined as a party In this Agreement.
+
+--- Chunk 5 ---
+## 2.0 SECURITY REQUIREMENTS 2.1 Company will have fun responsibity to implement and maintain reasonable information systems for electronic and other media thal are reasonably suilabie to protect the security of Anenican Famlly infomaticn processed, and to comply with this Agreemant, incuding without linitalion, physical, network. host, web and data securily. - 2.2 Company willmonitor for Secunity Incidents on the basis of 24 hours per day by 7 days per week by 365 days per year.
+
+--- Chunk 6 ---
+- 2.3 Company shall notify the American Famly lncident Response Team immediately of any Security involving the computing envronment,informsllon or communication systems, faciities pr transportatlon means Involved inProcessing AmericanFamily Information,vin Americen Family's incident Response Team's 24 x 7 hour tolephone number 608-280-1038 and have the Company's inlommation secunty on-cal tecliniclen paged within one (1) hour of Compapy becoming aware of occurrence of Security incident.
+
+--- Chunk 7 ---
+Additionally, within twenty-faur (24) hours of Company becoming aware of an occurrence of a Sccurity lncideni, Campany shall aisd notily American Family in writing and by emailto the Incident Mailbox address,Incident@amfsm.
+
+--- Chunk 8 ---
+com and INFOSECMGMT-L@amfam.com. ## 3.0 MALICIOUS CODE PROTECTION SOFTWARE ## 3.1 Process American FamilyProprletary and Confidential Document AFIDocumentversioning:V1.27/10/2014 - 6.2, System ChangesCompany shat make no syslem change that may adversely Bffect lhe securtly of the system or the securityof American Family Infomallon.
+
+--- Chunk 9 ---
+## 7.0 REMEDIES under thisAgreement andsubject to anyprovisionsforbreach andanyobtigationsof indemnificationas set forth in thisAgreement in additionfo any end Bllnights andremediesavaitabletoAmericanFamilyat lawor equily.
+
+--- Chunk 10 ---
+In addtion to any remedies otherwise available, Company, at its sole expensa, will be rasponsible for and redress any damages cr costs caused by,and take all reasonable steps to cure, such fature to perform,and will implement all corective actlonsreasonably requlred topreventsuchdefctenclesand occuirences appllcabletoCompany'sfurtherperfomanceunderthisAgreemenl.
+
+--- Chunk 11 ---
+shall entile American Family to injunctive relief in addition to any other legal semedies in any couint of have exclusive jurisdlction tohear any legal actionbrought by eitherparly under thisAgreemeni and the Oxclusivovenuo ofany such legal action shall beDaneCounly,Wisconsin. Company acknowledgesboth civi and criminat liabilily for any inlentional acts causing foss ormsuseof and Company.
+
+--- Chunk 12 ---
+Cornpany a)accepis ful liabilily for any losses which American Farnily may lncur as a result of Comoany's vlolation of this Agreement. misconduct, or gross negligence in utizing and proledting AmericanFamily'sInfommalion and b) agreeslo indemnilyand holdAmericanFamily harmlessfomanyand all losses, claims, demands or damages to or by any other parly (as wel as costs, expenses and reasonable Information.
+
+--- Chunk 13 ---
+Nothing in this Agreement shall be deemed or construed by the parties hereto, or any third parlles as creating arelationship of employment,principal and agent,partnership orjoint venture between fhe parlies. IN WTNESSWHEREOF,iheparties by their duly authorized representatives hereby have execuled thisAgrcement. <!-- image --> WSO2 INC. AMERICANFAMILYMUTUALINSURANCE|COMPANY BY. BY: NAME: NAIME: Claudins Tadn X VP. JECIVER Trans Arcmddknareaagn TITLEDIVISION. OATE. LARCH.S.QCI DATE: 3/24/2.017 <!
+
+--- Chunk 14 ---
+OATE. LARCH.S.QCI DATE: 3/24/2.017 <! -- image --> AmericanFamilyPropnielaryand Confidential Document AFI Document versioning:v1.27/10/2014

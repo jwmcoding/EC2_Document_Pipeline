@@ -1,0 +1,25 @@
+File: CAMC Proofpoint FMV Analysis.xlsx
+Document ID: ContentVersion/0680y0000035X2HAAU
+Client: Vandalia Health
+Vendor: Proofpoint
+Deal: Deal-37440
+Chunks: 1
+============================================================
+
+--- Chunk 0 ---
+=== Sheet1 ===
+Unnamed: 0 | Unnamed: 1 | Unnamed: 2 | Unnamed: 3 | Unnamed: 4 | Unnamed: 5 | Unnamed: 6 | Unnamed: 7 | Unnamed: 8 | Unnamed: 9 | Unnamed: 10 | Unnamed: 11
+----------------------------------------------------------------------------------------------------
+ | Year | Description | Part # | QTY | Unit Price | Ext Price | Notes |  |  |  | 
+ | 2018 | Proofpoint Targeted Attack Protection Attachment Defense Virtual Edition | PP-M-TAPADS-V-D-108 | 8450 | 11.6 | 98020 |  |  |  |  | 
+ |  | Proofpoint Platinum Support - technical support - 1 year | PP-SUP-PS-12 | 1 | 9810 | 9810 | ~10% of license cost |  |  |  | 
+ |  |  |  |  |  | 107830 |  |  |  |  | 
+ |  |  |  |  |  |  |  |  |  |  | 
+ |  | SKU VD means 'not saas' - support provided in a SaaS solution but not otherwise |  |  |  |  |  |  |  |  | 
+ |  |  |  |  |  |  |  |  |  |  | 
+ |  |  |  |  |  |  |  |  |  |  | 
+ |  |  |  |  |  |  |  |  | Year | Total | Increase
+ |  |  |  |  |  |  |  |  | 2016 | 105157.5 | 
+ |  |  |  |  |  |  |  |  | 2017 | 106628.5 | 0.01398854099802671
+ |  |  |  |  |  |  |  |  | 2018 | 107830 | 0.011
+

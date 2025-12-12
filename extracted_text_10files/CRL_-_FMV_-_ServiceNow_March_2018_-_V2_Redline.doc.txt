@@ -1,0 +1,58 @@
+File: CRL - FMV - ServiceNow March 2018 - V2 Redline.docx
+Document ID: ContentVersion/0680y0000035Y7EAAU
+Client: Charles River
+Vendor: ServiceNow
+Deal: Deal-37472
+Chunks: 17
+============================================================
+
+--- Chunk 0 ---
+Summary NPI FMV Assessment NPI reviewed CRL’s proposed quantities and is providing guidelines around fair market value (FMV) and best practices. ServiceNow customers face many challenges that are common with enterprise SaaS providers. The solution can grow rapidly and the vendor is notorious for levying heavy automatic price hikes if left unchecked.
+
+--- Chunk 1 ---
+ServiceNow continues to develop new offerings, and although CRL only anticipates the two license types, NPI expects the vendor will try to upsell different areas of your organization. If CRL considers adding any products to this proposal, NPI suggests using that additional demand as a point of leverage by positioning them as ‘nice-to-haves’ that could be left off due to cost considerations.
+
+--- Chunk 2 ---
+ServiceNow’s next fiscal quarter end is this month (March), and CRL’s offer to ServiceNow could provide key incentives to sales team quotas.
+
+--- Chunk 3 ---
+Pricing Analysis IT Service Management (ITSM) – Fulfiller User The core ITSM bundle is one of ServiceNow’s flagship products and sells at a wide discounting range. NPI’s FMV pricing range calls for discounts between 40 – 50% at these volumes. The discount number reflects the value of your combined anticipated spend, but it could creep higher if assumptions change.
+
+--- Chunk 4 ---
+Should CRL’s ITSM volume creep above 500, targeting an even $45 – $50 per user number (50 – 55% discount) becomes a more feasible consideration. Approver User List pricing for Approver Users is $25 per user per month, and discounting should at least mirror rates on the ITSM subscription. NPI does see discounting on Approver Users at higher rates than discounting for ITSM and other products, even at lower volumes.
+
+--- Chunk 5 ---
+Discounts up to 80%, or $5 per user per month, can be targeted if volumes in this category increase significantly. Targets NPI strongly recommends not mentioning specific discounts. ServiceNow is notorious for standing up to requests that solely revolve around discounts; they are typically much more receptive when clients speak to the long-term solution TCO, especially as it relates to pricing allowing for growth and new products.
+
+--- Chunk 6 ---
+NPI recommends getting ServiceNow to focus on getting the combined spend under an even $325K target annually in exchange for an expedited deal approval that can accommodate a March signature timeline. A fallback of $350k (a flat 45% discount) is appropriate. Negotiation Leverage and Strategy NPI sees pressure from the end of the fiscal quarter as the greatest point of leverage available to CRL.
+
+--- Chunk 7 ---
+NPI suggests messaging that a March deal could be possible at the right price, but that internal pressure at CRL to complete this deal isn’t particularly high. Automatic price hikes at renewal time are one of the greatest pain points NPI observes in ServiceNow transactions. The vendor has an internal standard of 7% increases, but NPI sees them go beyond that rate in some cases. NPI recommends including language in the MSA capping any end of term increases at 3%.
+
+--- Chunk 8 ---
+While a 7% increase is standard, ServiceNow sales teams do have authority to eliminate any increases in price if net contract value grows by 10% or more. This is something to consider when it comes time for renewal preparations. NPI cautions that ServiceNow will likely initiate conversations for other new products beyond ITSM and the Approver users. IT Operations Management (ITOM) and Security Operations are the most common products the vendor pitches after initial conversations.
+
+--- Chunk 9 ---
+If CRL is considering or (starts to consider) other subscriptions beyond this base demand, NPI recommends using them as a ‘carrot’ to incentivize the sales team to seek aggressive pricing to fit in all the desired components in a short deal timeframe. Other products may be part of conversations, but these areas usually require ServiceNow to be entrenched in the environment for longer. NPI recommends requesting assistance on any implementation costs to expedite approval of this project within CRL.
+
+--- Chunk 10 ---
+ServiceNow will give extra concessions for longer subscription terms. ServiceNow typically gives at least 5 – 10% better net pricing for 2 – 3-year terms, respectively. NPI cautions on entering into a longer subscription term in an initial agreement to gauge internal demand after 12 months. Another concession that NPI commonly sees as a final concession to push a signature is the inclusion of up to 3 – 5 free badges to the Knowledge customer expo.
+
+--- Chunk 11 ---
+*Legend === TABLE === Vendor | High-level Deal Description | High-level Deal Description | High-level Deal Description | High-level Deal Description ServiceNow | CRL is preparing to ask ServiceNow for a quote of ITSM and Approver users. There is no current quote and the vendor has not been approached. | CRL is preparing to ask ServiceNow for a quote of ITSM and Approver users. There is no current quote and the vendor has not been approached.
+
+--- Chunk 12 ---
+There is no current quote and the vendor has not been approached. | CRL is preparing to ask ServiceNow for a quote of ITSM and Approver users. There is no current quote and the vendor has not been approached. | CRL is preparing to ask ServiceNow for a quote of ITSM and Approver users. There is no current quote and the vendor has not been approached. Reseller | CRL is preparing to ask ServiceNow for a quote of ITSM and Approver users. There is no current quote and the vendor has not been approached.
+
+--- Chunk 13 ---
+There is no current quote and the vendor has not been approached. | CRL is preparing to ask ServiceNow for a quote of ITSM and Approver users. There is no current quote and the vendor has not been approached. | CRL is preparing to ask ServiceNow for a quote of ITSM and Approver users. There is no current quote and the vendor has not been approached. | CRL is preparing to ask ServiceNow for a quote of ITSM and Approver users. There is no current quote and the vendor has not been approached.
+
+--- Chunk 14 ---
+There is no current quote and the vendor has not been approached. N/A – Direct | CRL is preparing to ask ServiceNow for a quote of ITSM and Approver users. There is no current quote and the vendor has not been approached. | CRL is preparing to ask ServiceNow for a quote of ITSM and Approver users. There is no current quote and the vendor has not been approached. | CRL is preparing to ask ServiceNow for a quote of ITSM and Approver users.
+
+--- Chunk 15 ---
+There is no current quote and the vendor has not been approached. | CRL is preparing to ask ServiceNow for a quote of ITSM and Approver users. There is no current quote and the vendor has not been approached.
+
+--- Chunk 16 ---
+There is no current quote and the vendor has not been approached. Quote Number/Document Name | Date Received By NPI | Date Delivered to Client | Confidence Rating* | Target Cost Reduction N/A – No Quote | 3/8/18 | 3/12/18 | High | N/A – No Net === END TABLE === === TABLE === Type of Spend | Quantity | List Price IT Service Management | 500 | $600,000 Approver User | 70 | $21,000 Total | | $621,000 === END TABLE === === TABLE === Findings and Recommendations === END TABLE === === TABLE === Type of Spend | List Price | Target Price | Discount IT Service Management | $600,000 | $312,000 | 48% Approver User | $21,000 | $10,920 | 48% Total | $621,000 | $322,920 | 48% === END TABLE === === TABLE === Confidence Rating | # Comparable Deals Seen By NPI | | Analysis Outcome | Meaning High | > 10 | | Above FMV | Price above and Discounts below NPI’s fair market value range as compared to marketplace Medium | 5 to 10 | | FMV | Price/discounts within range of NPI’s fair market value as compared to marketplace Low | < 5 | | Below FMV | Price below and Discount above NPI’s fair market value range as compared to marketplace === END TABLE ===

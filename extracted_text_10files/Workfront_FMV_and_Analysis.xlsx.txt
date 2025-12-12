@@ -1,0 +1,28 @@
+File: Workfront FMV and Analysis.xlsx
+Document ID: ContentVersion/0680y0000035X2RAAU
+Client: Shaw Industries Group
+Vendor: Adobe (FKA Workfront)
+Deal: Deal-37441
+Chunks: 1
+============================================================
+
+--- Chunk 0 ---
+=== Sheet1 ===
+QTY | Part | Description | List Price | Customer Price | Discount | Target Discount | Target Price | Target Savings | Unnamed: 9 | Unnamed: 10 | Unnamed: 11
+----------------------------------------------------------------------------------------------------
+55.0 | WF-PRM-LF | Workfront Flex License | 66000 | 56760 | 0.14 | 0.3 | 46200.0 | 10560.0 |  |  | matches GSA pricing for 1 year($1027.71)
+20.0 | PHQ-PRM-FL | ProofHQ Premium Licence | 17000 | 13600 | 0.19999999999999996 | 0.3 | 11900.0 | 1700.0 |  |  | 
+ |  | Totals | 83000 | 70360 | 0.152289156626506 | 0.30000000000000004 | 58100.0 | 12260.0 |  |  | 
+ |  |  |  |  |  |  |  |  |  | Flex (concurrent?) | plan license, all inclusive license. Makes sense to go to flex if you have more work licenses than plan
+ |  |  |  |  |  |  |  |  |  |  | useful when people are coming and going so you don’t have to track who is using what
+ |  |  |  |  |  |  |  |  |  |  | Select flex vs premium flex lead to price increases
+ |  |  |  |  |  |  |  |  |  |  | Does Shaw need the flexibility as it does come from a cost?
+ |  |  |  |  |  |  |  |  |  |  | Flex does not specify whether it is Premium or Select? Not all AE's offer this, flexibility could be a reason for a smaller discount.
+ |  |  |  |  |  |  |  |  |  |  | discounting gets better longer the term,
+ |  |  |  |  |  |  |  |  |  |  | 
+ |  |  |  |  |  |  |  |  |  |  | work vs select. Flex can be advantageous, not always offered but could be why a little less discount.
+ |  |  |  |  |  |  |  |  |  |  | a lot of clients do 1 and 2 year, which fetch lower discounts. 30% doable for a 3 year term.
+ | Part | Description | List Price | Customer Price | Discount |  |  |  |  |  | 
+ | WF-PRM-LF | Workfront Flex License | 1200 | 1032 | 0.14 |  |  |  |  |  | 
+ | PHQ-PRM-FL | ProofHQ Premium Licence | 850 | 680 | 0.19999999999999996 |  |  |  |  |  | 
+ |  |  |  |  | 0.152289156626506 |  |  |  |  |  |

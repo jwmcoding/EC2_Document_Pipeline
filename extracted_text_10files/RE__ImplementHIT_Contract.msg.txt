@@ -1,0 +1,19 @@
+File: RE  ImplementHIT Contract.msg
+Document ID: ContentVersion/0680y0000035Ww4AAE
+Client: Springfield Clinic
+Vendor: ImplementHIT
+Deal: Deal-37435
+Chunks: 4
+============================================================
+
+--- Chunk 0 ---
+Subject: FW: ImplementHIT Contract Hi Chris, Hope you had a good weekend. Can you please review the attached at your earliest convenience. Thanks, Arvinder This electronic message contains information from Springfield Clinic, LLP that may be confidential, privileged, and/or sensitive. This information is intended for the use of the individual(s) or entity(ies) named above.
+
+--- Chunk 1 ---
+If you are not the intended recipient, be aware that disclosure, copying, distribution, or action taken on the contents of this information is strictly prohibited. If you have received this electronic message in error, please notify the sender immediately, by electronic mail, so that arrangements may be made for the retrieval of this electronic message.
+
+--- Chunk 2 ---
+NPI reviewed the SOW from ImplementHIT and found the pricing to be well within Fair Market Value. A Jimenez MD MSED is the CEO of ImplementHIT and a $250 per hour rate for a senior consulting role is well within FMV. Market range is between $200/hour and $315/per hour. The other resources are priced at $140 per hour which is also at Fair Market Value. Typical market range is $125 - $150 per hour.
+
+--- Chunk 3 ---
+Typical market range is $125 - $150 per hour. Furthermore, ImplementHIT has provided a discount of 20% on the consulting fees which makes the cost very competitive. Overall, based on comparisons to market rates, Springfield Clinic is good to go with this purchase. Thanks, Smita From: Chris Vicknair Sent: Monday, February 19, 2018 4:20 PM To: Smita Manjunath <smanjunath@npifinancial.
