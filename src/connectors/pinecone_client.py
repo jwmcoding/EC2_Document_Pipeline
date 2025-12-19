@@ -6,13 +6,153 @@ Adapted from proven working Quick_Check hybrid search implementation
 import os
 import uuid
 import logging
+import re
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Any, Tuple, Generator
 from pinecone import Pinecone
 from pinecone.exceptions import PineconeApiException
-from datetime import datetime
+from datetime import datetime, timezone
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import time
+import math
+
+
+def _sanitize_str(value: Any, default: str = "") -> str:
+    """
+    Sanitize value to a clean string for Pinecone metadata.
+    
+    Converts None, NaN, 'None', 'nan', 'NaN' to empty string.
+    This prevents polluting Pinecone metadata with string representations
+    of null values that break filtering and look bad in search results.
+    """
+    if value is None:
+        return default
+    # Handle float NaN (math.isnan only works on floats)
+    if isinstance(value, float) and math.isnan(value):
+        return default
+    # Convert to string and check for null-like strings
+    str_val = str(value).strip()
+    if str_val.lower() in ('none', 'nan', 'null', ''):
+        return default
+    return str_val
+
+
+def _sanitize_numeric(value: Any, default: float = 0.0) -> float:
+    """
+    Sanitize numeric value for Pinecone metadata.
+    
+    Converts None, NaN, pandas NaN to default value.
+    Pinecone cannot store NaN values in metadata.
+    
+    Args:
+        value: Value to sanitize (can be float, int, str, pandas.NaN, None)
+        default: Default value to return if value is invalid (default: 0.0)
+        
+    Returns:
+        Valid float value safe for Pinecone metadata
+    """
+    if value is None:
+        return default
+    
+    # Handle pandas NaN (try/except to avoid requiring pandas import)
+    try:
+        import pandas as pd
+        if pd.isna(value):
+            return default
+    except (ImportError, TypeError):
+        pass
+    
+    # Handle Python float NaN
+    if isinstance(value, float) and math.isnan(value):
+        return default
+    
+    # Try to convert to float
+    try:
+        result = float(value)
+        # Double-check for NaN after conversion
+        if math.isnan(result):
+            return default
+        return result
+    except (ValueError, TypeError):
+        return default
+
+
+def _parse_date_to_unix_ts(value: Any) -> Optional[int]:
+    """
+    Parse common Salesforce/ISO date formats into a Unix timestamp (seconds).
+
+    Pinecone metadata range filtering ($gt/$gte/$lt/$lte) only supports numeric
+    fields. We therefore store both:
+      - string date fields for display/debug, AND
+      - numeric *_ts fields for reliable range filters.
+    """
+    if value is None:
+        return None
+
+    # Handle pandas/numpy NaN before any conversions
+    try:
+        import pandas as pd
+        if pd.isna(value):
+            return None
+    except (ImportError, TypeError):
+        pass
+    
+    # Handle Python float NaN
+    if isinstance(value, float) and math.isnan(value):
+        return None
+
+    # Allow already-numeric timestamps (or numeric strings).
+    if isinstance(value, (int, float)):
+        ts_int = int(value)
+        return ts_int if ts_int > 0 else None
+
+    if not isinstance(value, str):
+        value = str(value)
+
+    s = value.strip()
+    if not s or s.lower() in ("none", "nan", "null"):
+        return None
+
+    # Normalize a few common ISO variants so datetime.fromisoformat can handle them.
+    # - Strip fractional seconds (Python stdlib ISO parser is picky in some forms)
+    # - Convert trailing "Z" to "+00:00"
+    # - Convert offsets like "+0000" to "+00:00"
+    normalized = s
+    normalized = re.sub(r"(\.\d+)(Z|[+-]\d{2}:?\d{2})$", r"\2", normalized)  # drop fractional seconds
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    normalized = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", normalized)  # +0000 -> +00:00
+
+    # Try ISO first (covers YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, with/without tz).
+    try:
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return int(dt.timestamp())
+    except Exception:
+        pass
+
+    # Try common Salesforce-ish / CSV-ish formats (naive -> assume UTC).
+    for fmt in (
+        "%m/%d/%y %H:%M",
+        "%m/%d/%Y %H:%M",
+        "%m/%d/%y",
+        "%m/%d/%Y",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d",
+    ):
+        try:
+            dt = datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+            return int(dt.timestamp())
+        except Exception:
+            continue
+
+    return None
+
 
 @dataclass
 class DocumentSearchResult:
@@ -459,73 +599,81 @@ class PineconeDocumentClient:
                 
                 # Extract enhanced metadata
                 metadata = chunk["metadata"]
+
+                deal_creation_date_ts = _parse_date_to_unix_ts(metadata.get("deal_creation_date"))
+                contract_start_ts = _parse_date_to_unix_ts(metadata.get("contract_start"))
+                contract_end_ts = _parse_date_to_unix_ts(metadata.get("contract_end"))
                 
                 # Prepare metadata for Pinecone - SIMPLIFIED 22-FIELD SCHEMA (Dec 2025)
                 # Based on METADATA_SIMPLIFICATION_PLAN.md analysis
                 # Reduced from 53 → 26 → 24 → 22 fields
                 # Removed: client_id/vendor_id (duplicates), parser_backend/processing_method (internal only)
+                # Use _sanitize_str to convert None/NaN/'None'/'nan' to empty strings
+                # This prevents polluting Pinecone metadata with null-like string values
                 pinecone_metadata = {
                     # ===== CORE DOCUMENT (3 fields) =====
-                    "file_name": str(metadata.get("name", ""))[:200],  # Truncate to 200 chars to prevent size limit errors
-                    "file_type": str(metadata.get("file_type", "")),
-                    "deal_creation_date": str(metadata.get("deal_creation_date", "")),  # For time-based filtering
+                    "file_name": _sanitize_str(metadata.get("name"))[:200],  # Truncate to 200 chars
+                    "file_type": _sanitize_str(metadata.get("file_type")),
+                    "deal_creation_date": _sanitize_str(metadata.get("deal_creation_date")),
                     
                     # ===== IDENTIFIERS (4 fields) =====
-                    # NOTE: Removed client_id & vendor_id - they duplicate client_name/vendor_name
-                    "deal_id": str(metadata.get("deal_id", "")),                          # User-friendly deal number
-                    "salesforce_deal_id": str(metadata.get("salesforce_deal_id", "")),    # Raw SF ID for tracing
-                    "salesforce_client_id": str(metadata.get("salesforce_client_id", "")),  # Raw SF ID for tracing
-                    "salesforce_vendor_id": str(metadata.get("salesforce_vendor_id", "")),  # Raw SF ID for tracing
+                    "deal_id": _sanitize_str(metadata.get("deal_id")),
+                    "salesforce_deal_id": _sanitize_str(metadata.get("salesforce_deal_id")),
+                    "salesforce_client_id": _sanitize_str(metadata.get("salesforce_client_id")),
+                    "salesforce_vendor_id": _sanitize_str(metadata.get("salesforce_vendor_id")),
                     
                     # ===== FINANCIAL (6 fields) =====
-                    "final_amount": float(metadata.get("final_amount") or 0.0),
-                    "savings_1yr": float(metadata.get("savings_1yr") or 0.0),
-                    "savings_3yr": float(metadata.get("savings_3yr") or 0.0),
-                    "savings_achieved": str(metadata.get("savings_achieved", ""))[:200],
-                    "fixed_savings": float(metadata.get("fixed_savings") or 0.0),
-                    "savings_target_full_term": float(metadata.get("savings_target_full_term") or 0.0),
+                    "final_amount": _sanitize_numeric(metadata.get("final_amount")),
+                    "savings_1yr": _sanitize_numeric(metadata.get("savings_1yr")),
+                    "savings_3yr": _sanitize_numeric(metadata.get("savings_3yr")),
+                    "savings_achieved": _sanitize_str(metadata.get("savings_achieved"))[:200],
+                    "fixed_savings": _sanitize_numeric(metadata.get("fixed_savings")),
+                    "savings_target_full_term": _sanitize_numeric(metadata.get("savings_target_full_term")),
                     
                     # ===== CONTRACT (3 fields) =====
-                    "contract_term": str(metadata.get("contract_term", ""))[:100],
-                    "contract_start": str(metadata.get("contract_start", "")),
-                    "contract_end": str(metadata.get("contract_end", "")),
+                    "contract_term": _sanitize_str(metadata.get("contract_term"))[:100],
+                    "contract_start": _sanitize_str(metadata.get("contract_start")),
+                    "contract_end": _sanitize_str(metadata.get("contract_end")),
                     
                     # ===== PROCESSING (1 field) =====
-                    # NOTE: Removed parser_backend and processing_method - internal tracking only, not needed in search
-                    "chunk_index": int(metadata.get("chunk_index") or 0),
+                    "chunk_index": int(_sanitize_numeric(metadata.get("chunk_index"), default=0)),
                     
                     # ===== SEARCH (2 fields) =====
-                    "client_name": str(metadata.get("client_name", ""))[:100],
-                    "vendor_name": str(metadata.get("vendor_name", ""))[:100],
+                    "client_name": _sanitize_str(metadata.get("client_name"))[:100],
+                    "vendor_name": _sanitize_str(metadata.get("vendor_name"))[:100],
                     
                     # ===== QUALITY (2 fields) =====
                     "has_parsing_errors": bool(len(metadata.get("parsing_errors", [])) > 0),
-                    "deal_status": str(metadata.get("deal_status", "")),
+                    "deal_status": _sanitize_str(metadata.get("deal_status")),
                     
                     # ===== EMAIL (1 field) =====
                     "email_has_attachments": bool(metadata.get("email_has_attachments", False)),
                     
-                    # ===== DEAL CLASSIFICATION (8 fields) - NEW December 2025 =====
-                    "report_type": str(metadata.get("report_type", ""))[:100],  # Truncate to 100 chars
-                    "description": str(metadata.get("description", ""))[:500] if metadata.get("description") else "",  # Truncate to 500 chars
-                    "project_type": str(metadata.get("project_type", ""))[:50],  # Truncate to 50 chars
-                    "competition": str(metadata.get("competition", ""))[:10],  # Truncate to 10 chars (Yes/No)
-                    "npi_analyst": str(metadata.get("npi_analyst", ""))[:50],  # Truncate to 50 chars (Salesforce user ID)
-                    "dual_multi_sourcing": str(metadata.get("dual_multi_sourcing", ""))[:10],  # Truncate to 10 chars (0.0/1.0)
-                    "time_pressure": str(metadata.get("time_pressure", ""))[:20],  # Truncate to 20 chars (Some/Moderate/Extreme)
-                    "advisor_network_used": str(metadata.get("advisor_network_used", ""))[:10],  # Truncate to 10 chars (Yes/No)
+                    # ===== DEAL CLASSIFICATION (7 fields) - NEW December 2025 =====
+                    "report_type": _sanitize_str(metadata.get("report_type"))[:100],
+                    "project_type": _sanitize_str(metadata.get("project_type"))[:50],
+                    "competition": _sanitize_str(metadata.get("competition"))[:10],
+                    "npi_analyst": _sanitize_str(metadata.get("npi_analyst"))[:50],
+                    "dual_multi_sourcing": _sanitize_str(metadata.get("dual_multi_sourcing"))[:10],
+                    "time_pressure": _sanitize_str(metadata.get("time_pressure"))[:20],
+                    "advisor_network_used": _sanitize_str(metadata.get("advisor_network_used"))[:10],
                     
                     # ===== TEXT CONTENT (1 field) =====
-                    # Text field truncated to 37KB to fit within Pinecone's 40KB metadata limit
-                    # This enables text searchability in metadata while preventing size limit errors
-                    "text": str(metadata.get("text", ""))[:37000] if metadata.get("text") else "",  # Truncate to ~37KB (actual truncation done upstream)
+                    "text": _sanitize_str(metadata.get("text"))[:37000],
                 }
-                # TOTAL: 30 fields (includes truncated text field in metadata)
-                # REMOVED in Dec 5 update: client_id, vendor_id (duplicates), parser_backend, processing_method (internal only)
-                # ADDED in Dec 7 update: 8 deal classification fields (report_type, description, project_type, competition, npi_analyst, dual_multi_sourcing, time_pressure, advisor_network_used)
-                # Added December 2025: report_type, description, project_type, competition, npi_analyst, 
-                #                      dual_multi_sourcing, time_pressure, advisor_network_used
-                # REMOVED in Dec 5 update: client_id, vendor_id (duplicates), parser_backend, processing_method (internal only)
+                # Add Unix timestamp variants for reliable Pinecone range filters.
+                # (Pinecone range operators only support numeric values.)
+                if deal_creation_date_ts is not None:
+                    pinecone_metadata["deal_creation_date_ts"] = int(deal_creation_date_ts)
+                if contract_start_ts is not None:
+                    pinecone_metadata["contract_start_ts"] = int(contract_start_ts)
+                if contract_end_ts is not None:
+                    pinecone_metadata["contract_end_ts"] = int(contract_end_ts)
+                # TOTAL: 30 base fields + 3 conditional timestamps = 33 max
+                # See memory-bank/CURRENT_METADATA_SCHEMA.md for full documentation
+                # REMOVED in Dec 5: client_id, vendor_id (duplicates), parser_backend, processing_method
+                # ADDED in Dec 7: 7 deal classification fields
+                # REMOVED Dec 14: description (long text not suitable for filtering)
                 # REMOVED earlier: document_path, file_size_mb, modified_time, week_number, week_date, 
                 #          vendor, client, deal_number, deal_name, deal_subject, deal_reason, 
                 #          deal_start_date, negotiated_by, proposed_amount, savings_target, 

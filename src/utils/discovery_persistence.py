@@ -6,6 +6,7 @@ supporting batch saves, progress tracking, and incremental updates.
 """
 
 import json
+import math
 import os
 import shutil
 from datetime import datetime
@@ -16,6 +17,30 @@ import logging
 import hashlib
 from filelock import FileLock
 from datetime import timezone
+
+
+def _sanitize_for_json(obj: Any) -> Any:
+    """
+    Recursively sanitize data for JSON serialization.
+    
+    Converts NaN and Infinity to None (null in JSON).
+    This prevents invalid JSON with literal 'NaN' or 'Infinity' values.
+    
+    Args:
+        obj: Any Python object (dict, list, or scalar)
+        
+    Returns:
+        Sanitized object safe for json.dump()
+    """
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    elif isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    return obj
 
 try:
     from src.config.colored_logging import ColoredLogger
@@ -55,6 +80,10 @@ class DiscoveryPersistence:
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.documents_buffer = []
         self.buffer_size = 100  # Flush every 100 documents
+        
+        # Batched update tracking (to reduce disk writes)
+        self._pending_updates = 0
+        self._batch_save_threshold = 50  # Save to disk every 50 document updates
         
         # Initialize or load existing data
         self._initialize_storage()
@@ -215,9 +244,9 @@ class DiscoveryPersistence:
                 self.data["discovery_metadata"]["total_documents"] = len(self.data["documents"])
                 self.data["discovery_progress"]["documents_discovered"] = len(self.data["documents"])
                 
-                # Save to temp file first
+                # Save to temp file first (sanitize NaN/Inf to prevent invalid JSON)
                 with open(self.temp_file, 'w') as f:
-                    json.dump(self.data, f, indent=2, default=str)
+                    json.dump(_sanitize_for_json(self.data), f, indent=2, default=str)
                 
                 # Atomic rename
                 shutil.move(str(self.temp_file), str(self.output_file))
@@ -232,13 +261,14 @@ class DiscoveryPersistence:
             self.logger.error(f"❌ Error flushing buffer: {e}")
             raise
     
-    def update_document_metadata(self, file_path: str, updates: Dict[str, Any]):
+    def update_document_metadata(self, file_path: str, updates: Dict[str, Any], save_immediately: bool = False):
         """
         Update metadata for a specific document.
         
         Args:
             file_path: Path to identify the document
             updates: Dictionary of fields to update
+            save_immediately: If True, save to disk immediately (default: batched)
         """
         updated = False
         
@@ -260,17 +290,49 @@ class DiscoveryPersistence:
                             doc[key] = value
                     
                     updated = True
+                    self._pending_updates += 1
                     self.logger.info(f"📝 Updated metadata for {file_path}")
                     break
             
             if updated:
-                # Save changes
-                with open(self.output_file, 'w') as f:
-                    json.dump(self.data, f, indent=2, default=str)
+                # Batch saves: only write to disk every N updates or if explicitly requested
+                if save_immediately or self._pending_updates >= self._batch_save_threshold:
+                    self._atomic_save()
+                    self._pending_updates = 0
             else:
                 self.logger.warning(f"⚠️ Document not found: {file_path}")
         
         return updated
+    
+    def _atomic_save(self):
+        """Save data atomically using temp file + rename pattern"""
+        try:
+            # Write to temp file first (sanitize NaN/Inf to prevent invalid JSON)
+            with open(self.temp_file, 'w') as f:
+                json.dump(_sanitize_for_json(self.data), f, indent=2, default=str)
+                f.flush()          # Flush Python buffers
+                os.fsync(f.fileno())  # Force write to disk
+            
+            # Atomic rename (works on POSIX systems)
+            shutil.move(str(self.temp_file), str(self.output_file))
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error during atomic save: {e}")
+            # Try to clean up temp file
+            if self.temp_file.exists():
+                try:
+                    self.temp_file.unlink()
+                except:
+                    pass
+            raise
+    
+    def flush_updates(self):
+        """Force save any pending updates to disk"""
+        with self.lock:
+            if self._pending_updates > 0:
+                self._atomic_save()
+                self._pending_updates = 0
+                self.logger.info(f"💾 Flushed pending updates to disk")
     
     def get_discovery_summary(self) -> Dict[str, Any]:
         """Get summary of discovery results"""
@@ -335,8 +397,9 @@ class DiscoveryPersistence:
         self.data["discovery_metadata"]["total_batches"] = self.data["discovery_progress"]["current_batch"]
         
         with self.lock:
+            # Sanitize NaN/Inf to prevent invalid JSON
             with open(self.output_file, 'w') as f:
-                json.dump(self.data, f, indent=2, default=str)
+                json.dump(_sanitize_for_json(self.data), f, indent=2, default=str)
         
         self.logger.success("🎉 Discovery marked as complete")
     
@@ -481,6 +544,8 @@ class DiscoveryPersistence:
                 "processed": False,
                 "processing_date": None,
                 "processor_version": None,
+                "parser_backend": None,  # PDF parser selection (docling, mistral, pdfplumber)
+                "content_parser": None,  # Actual parser for file type (extract_msg, python_docx, etc.)
                 "chunks_created": 0,
                 "vectors_created": 0,
                 "pinecone_namespace": None,
@@ -653,6 +718,53 @@ class DiscoveryPersistence:
         return ""
 
     @classmethod
+    def _parse_deal_date(cls, date_str: Optional[str]) -> Optional[datetime]:
+        """
+        Parse deal creation date from Salesforce format.
+        
+        Handles formats:
+        - "M/D/YY HH:MM" (e.g., "10/23/17 15:09") - primary Salesforce format
+        - "MM/DD/YY HH:MM" (e.g., "01/05/18 09:30")
+        - ISO 8601 fallback
+        
+        Returns naive datetime (no timezone) for consistent comparison.
+        """
+        if not date_str or not isinstance(date_str, str):
+            return None
+        
+        date_str = date_str.strip()
+        if not date_str:
+            return None
+        
+        # Try Salesforce format first: M/D/YY HH:MM
+        for fmt in ["%m/%d/%y %H:%M", "%m/%d/%Y %H:%M", "%m/%d/%y", "%m/%d/%Y"]:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+        
+        # Fallback to ISO datetime parser (strip timezone for consistency)
+        dt = cls._parse_iso_datetime(date_str)
+        if dt and dt.tzinfo is not None:
+            return dt.replace(tzinfo=None)
+        return dt
+    
+    @classmethod
+    def _get_deal_creation_date(cls, doc: Dict[str, Any]) -> Optional[str]:
+        """Get deal_creation_date from document, checking both metadata locations."""
+        # Check business_metadata first (primary location)
+        bm = doc.get("business_metadata", {})
+        if bm.get("deal_creation_date"):
+            return bm["deal_creation_date"]
+        
+        # Fallback to deal_metadata
+        dm = doc.get("deal_metadata", {})
+        if dm.get("deal_creation_date"):
+            return dm["deal_creation_date"]
+        
+        return None
+
+    @classmethod
     def filter_documents(
         cls,
         documents: List[Dict[str, Any]],
@@ -662,11 +774,17 @@ class DiscoveryPersistence:
         exclude_file_types: Optional[Set[str]] = None,
         modified_after: Optional[str] = None,
         modified_before: Optional[str] = None,
+        deal_created_after: Optional[str] = None,
+        deal_created_before: Optional[str] = None,
         min_size_kb: Optional[float] = None,
         max_size_mb: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Filter discovery documents using a small set of production-safe filters.
+        
+        Date filters:
+        - modified_after/before: Filter by file modified_time (disk date - less reliable)
+        - deal_created_after/before: Filter by deal_creation_date from Salesforce (authoritative)
 
         Returns dict:
           {
@@ -679,6 +797,10 @@ class DiscoveryPersistence:
 
         after_dt = cls._parse_iso_datetime(modified_after) if modified_after else None
         before_dt = cls._parse_iso_datetime(modified_before) if modified_before else None
+        
+        # Parse deal date filters (use deal date parser - returns naive datetime for consistency)
+        deal_after_dt = cls._parse_deal_date(deal_created_after) if deal_created_after else None
+        deal_before_dt = cls._parse_deal_date(deal_created_before) if deal_created_before else None
 
         stats = {
             "input_total": len(documents),
@@ -687,6 +809,9 @@ class DiscoveryPersistence:
             "excluded_modified_time_missing_or_invalid": 0,
             "excluded_modified_after": 0,
             "excluded_modified_before": 0,
+            "excluded_deal_date_missing": 0,
+            "excluded_deal_created_after": 0,
+            "excluded_deal_created_before": 0,
             "excluded_min_size": 0,
             "excluded_max_size": 0,
             "output_total": 0,
@@ -745,6 +870,23 @@ class DiscoveryPersistence:
                     stats["excluded_modified_before"] += 1
                     continue
 
+            # Deal creation date filtering (authoritative Salesforce date)
+            if deal_after_dt or deal_before_dt:
+                deal_date_str = cls._get_deal_creation_date(doc)
+                deal_dt = cls._parse_deal_date(deal_date_str) if deal_date_str else None
+                
+                if not deal_dt:
+                    stats["excluded_deal_date_missing"] += 1
+                    continue
+                
+                if deal_after_dt and deal_dt < deal_after_dt:
+                    stats["excluded_deal_created_after"] += 1
+                    continue
+                
+                if deal_before_dt and deal_dt > deal_before_dt:
+                    stats["excluded_deal_created_before"] += 1
+                    continue
+
             filtered.append(doc)
 
         stats["output_total"] = len(filtered)
@@ -765,6 +907,104 @@ class DiscoveryPersistence:
             file_type = doc.get("file_info", {}).get("file_type") or doc.get("file_type", "Unknown")
             distribution[file_type] = distribution.get(file_type, 0) + 1
         return distribution
+    
+    def _get_year_distribution(self) -> Dict[str, int]:
+        """Get distribution of documents by year (from modified_time or deal_creation_date)"""
+        from datetime import datetime
+        distribution = {}
+        no_date_count = 0
+        
+        for doc in self.data["documents"]:
+            year = None
+            
+            # Try modified_time first
+            modified_time = doc.get("file_info", {}).get("modified_time")
+            if modified_time:
+                try:
+                    if isinstance(modified_time, str):
+                        # Handle various date formats
+                        for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
+                            try:
+                                year = datetime.strptime(modified_time[:19], fmt).year
+                                break
+                            except ValueError:
+                                continue
+                except Exception:
+                    pass
+            
+            # Try deal_creation_date as fallback
+            if not year:
+                deal_date = doc.get("deal_metadata", {}).get("deal_creation_date") or \
+                           doc.get("business_metadata", {}).get("deal_creation_date")
+                if deal_date:
+                    try:
+                        if isinstance(deal_date, str):
+                            for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
+                                try:
+                                    year = datetime.strptime(deal_date[:19], fmt).year
+                                    break
+                                except ValueError:
+                                    continue
+                    except Exception:
+                        pass
+            
+            if year:
+                year_str = str(year)
+                distribution[year_str] = distribution.get(year_str, 0) + 1
+            else:
+                no_date_count += 1
+        
+        if no_date_count > 0:
+            distribution["no_date"] = no_date_count
+            
+        return distribution
+    
+    def _get_size_statistics(self) -> Dict[str, Any]:
+        """Get file size statistics"""
+        sizes = []
+        for doc in self.data["documents"]:
+            size_mb = doc.get("file_info", {}).get("size_mb", 0)
+            if size_mb:
+                sizes.append(size_mb)
+        
+        if not sizes:
+            return {"total_size_mb": 0, "avg_size_mb": 0, "max_size_mb": 0, "min_size_mb": 0}
+        
+        return {
+            "total_size_mb": round(sum(sizes), 2),
+            "avg_size_mb": round(sum(sizes) / len(sizes), 2),
+            "max_size_mb": round(max(sizes), 2),
+            "min_size_mb": round(min(sizes), 2),
+            "files_over_10mb": sum(1 for s in sizes if s > 10),
+            "files_over_50mb": sum(1 for s in sizes if s > 50)
+        }
+    
+    def get_detailed_summary(self) -> Dict[str, Any]:
+        """Get comprehensive discovery summary with date ranges, file types, and sizes"""
+        basic_summary = self.get_discovery_summary()
+        
+        # Add detailed statistics
+        year_dist = self._get_year_distribution()
+        file_dist = self._get_file_type_distribution()
+        size_stats = self._get_size_statistics()
+        
+        # Calculate date range
+        years = [int(y) for y in year_dist.keys() if y != "no_date"]
+        date_range = {
+            "earliest_year": min(years) if years else None,
+            "latest_year": max(years) if years else None,
+            "pre_2000_count": sum(v for k, v in year_dist.items() if k != "no_date" and int(k) < 2000),
+            "2000_and_later_count": sum(v for k, v in year_dist.items() if k != "no_date" and int(k) >= 2000)
+        }
+        
+        basic_summary["detailed_statistics"] = {
+            "year_distribution": dict(sorted(year_dist.items())),
+            "file_type_distribution": dict(sorted(file_dist.items(), key=lambda x: x[1], reverse=True)),
+            "date_range": date_range,
+            "size_statistics": size_stats
+        }
+        
+        return basic_summary
     
     def __enter__(self):
         """Context manager entry"""
