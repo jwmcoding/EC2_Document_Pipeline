@@ -215,7 +215,35 @@ class LocalFilesystemClient(FileSourceInterface):
         """Download (read) file content"""
         try:
             full_path = self.base_path / file_path
-            
+
+            if not full_path.exists():
+                # Salesforce raw exports: discovery paths are often ContentVersion/<ContentVersionId>
+                # but payloads live under ContentVersions/VersionData/<ContentVersionId>/<filename>.
+                path_str = str(file_path)
+
+                # Strategy 0: ContentVersion/<id> flat file (some exports)
+                if path_str.startswith("ContentVersion/"):
+                    cv_id = path_str.split("/", 1)[1].strip()
+                    flat_candidate = self.base_path / "ContentVersion" / cv_id
+                    if flat_candidate.exists() and flat_candidate.is_file():
+                        full_path = flat_candidate
+                    else:
+                        # Strategy 1: ContentVersions/VersionData/<id>/... (common)
+                        version_dir = self.base_path / "ContentVersions" / "VersionData" / cv_id
+                        if version_dir.exists() and version_dir.is_dir():
+                            # Choose the first non-hidden file found (there is usually one)
+                            for candidate in version_dir.rglob("*"):
+                                if candidate.is_file() and not candidate.name.startswith("."):
+                                    full_path = candidate
+                                    break
+
+                # Strategy 2: Already a VersionData path but different casing/pluralization
+                if not full_path.exists() and path_str.startswith("ContentVersions/"):
+                    # If caller passed ContentVersions/... relative path, re-evaluate with base_path
+                    candidate = self.base_path / path_str
+                    if candidate.exists():
+                        full_path = candidate
+
             if not full_path.exists():
                 raise FileNotFoundError(f"File not found: {file_path}")
             

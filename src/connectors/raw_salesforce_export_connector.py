@@ -333,8 +333,8 @@ class RawSalesforceExportConnector(FileSourceInterface):
                 'customer_comments': row.get('Comments_To_Customer__c', ''),
                 
                 # Deal classification fields (added December 2025)
+                # Note: Description__c removed Dec 14 - long text not suitable for Pinecone filtering
                 'report_type': self._to_str_or_none(row.get('Report_Type__c')),
-                'description': self._to_str_or_none(row.get('Description__c')),
                 'project_type': self._to_str_or_none(row.get('Project_Type__c')),
                 'competition': self._to_str_or_none(row.get('Competition__c')),
                 'npi_analyst': self._to_str_or_none(row.get('NPI_Analyst__c')),
@@ -699,7 +699,6 @@ class RawSalesforceExportConnector(FileSourceInterface):
         
         # Deal Classification Fields (added December 2025)
         doc_metadata.report_type = deal_data.get('report_type')
-        doc_metadata.description = deal_data.get('description')
         doc_metadata.project_type = deal_data.get('project_type')
         doc_metadata.competition = deal_data.get('competition')
         doc_metadata.npi_analyst = deal_data.get('npi_analyst')

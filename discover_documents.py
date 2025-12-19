@@ -42,6 +42,11 @@ from src.connectors.salesforce_file_source import SalesforceFileSource
 from src.connectors.raw_salesforce_export_connector import RawSalesforceExportConnector
 from src.utils.discovery_persistence import DiscoveryPersistence
 
+# Discovery defaults
+DEFAULT_BATCH_SIZE: int = 100
+MIN_FILE_SIZE_KB_DEFAULT: float = 10.0
+
+__all__ = ["DocumentDiscovery", "create_argument_parser", "main"]
 
 class DocumentDiscovery:
     """Document discovery and metadata extraction (no LLM classification)"""
@@ -54,9 +59,27 @@ class DocumentDiscovery:
         self.source_client: Optional[FileSourceInterface] = None
         self.persistence: Optional[DiscoveryPersistence] = None
         
-    def run(self, args: argparse.Namespace):
-        """Run document discovery based on arguments"""
+    def run(self, args: argparse.Namespace) -> None:
+        """Run document discovery based on arguments.
+        
+        Args:
+            args: Parsed command line arguments.
+            
+        Raises:
+            ValueError: If required arguments are missing or invalid.
+            RuntimeError: If discovery fails.
+        """
         try:
+            # Show summary mode - just display stats from existing discovery file
+            if getattr(args, 'show_summary', False):
+                if not Path(args.output).exists():
+                    self.logger.error(f"❌ Discovery file not found: {args.output}")
+                    return
+                self.persistence = DiscoveryPersistence(args.output)
+                detailed_summary = self.persistence.get_detailed_summary()
+                self._display_detailed_summary(detailed_summary)
+                return
+            
             # Initialize persistence
             self.persistence = DiscoveryPersistence(args.output)
             
@@ -67,7 +90,8 @@ class DocumentDiscovery:
                 
                 if summary.get('discovery_completed', False):
                     self.logger.success(f"✅ Discovery already complete: {args.output}")
-                    self._display_summary(summary)
+                    detailed_summary = self.persistence.get_detailed_summary()
+                    self._display_detailed_summary(detailed_summary)
                     return
                 else:
                     self.logger.info("🔄 Resuming interrupted discovery")
@@ -87,8 +111,15 @@ class DocumentDiscovery:
             self.logger.error(f"❌ Discovery failed: {e}")
             raise
     
-    def _initialize_source_client(self, args: argparse.Namespace):
-        """Initialize the appropriate source client"""
+    def _initialize_source_client(self, args: argparse.Namespace) -> None:
+        """Initialize the appropriate source client based on source type.
+        
+        Args:
+            args: Parsed command line arguments containing source configuration.
+            
+        Raises:
+            ValueError: If required arguments are missing for the selected source type.
+        """
         if args.source == "dropbox":
             if not args.folder:
                 raise ValueError("--folder is required for Dropbox source")
@@ -127,14 +158,21 @@ class DocumentDiscovery:
             if not args.deal_metadata_csv:
                 raise ValueError("--deal-metadata-csv is required for Salesforce source")
             
+            # Default: require deal association and minimum file size to skip tiny icons/logos
+            # Handle override flags
+            require_deal = not getattr(args, 'include_unmapped', False)  # --include-unmapped overrides
+            min_size_kb = getattr(args, 'min_size_kb', MIN_FILE_SIZE_KB_DEFAULT) or MIN_FILE_SIZE_KB_DEFAULT  # Default 10KB to skip icons
+            
             self.source_client = SalesforceFileSource(
                 organized_files_dir=args.salesforce_files_dir,
                 file_mapping_csv=args.file_mapping_csv,
                 deal_metadata_csv=args.deal_metadata_csv,
                 client_mapping_csv=getattr(args, 'client_mapping_csv', None),
-                vendor_mapping_csv=getattr(args, 'vendor_mapping_csv', None)
+                vendor_mapping_csv=getattr(args, 'vendor_mapping_csv', None),
+                require_deal_association=require_deal,
+                min_file_size_kb=min_size_kb
             )
-            self.logger.info("✅ Salesforce file source initialized with Deal metadata")
+            self.logger.info(f"✅ Salesforce file source initialized (require_deal={require_deal}, min_size={min_size_kb}KB)")
         
         elif args.source == "salesforce_raw":
             # Raw Salesforce export source requires export root and CSV files
@@ -182,8 +220,15 @@ class DocumentDiscovery:
         else:
             raise ValueError(f"Unknown source: {args.source}")
     
-    def _run_discovery(self, args: argparse.Namespace):
-        """Run the discovery process"""
+    def _run_discovery(self, args: argparse.Namespace) -> None:
+        """Run the discovery process.
+        
+        Scans the configured source, extracts metadata, and saves results
+        to the discovery JSON file.
+        
+        Args:
+            args: Parsed command line arguments.
+        """
         start_time = datetime.now()
         
         # Get the folder path for discovery
@@ -265,24 +310,11 @@ class DocumentDiscovery:
         # Display final summary
         elapsed = datetime.now() - start_time
         self.logger.success("🎉 Phase 1: Basic Classification Complete!")
-        self.logger.info(f"📊 Total documents: {total_discovered}")
-        
-        # Source-specific classification description
-        if hasattr(self.source_client, 'export_root_dir'):
-            # Raw Salesforce export source
-            self.logger.info(f"📊 Basic classification: Raw export CSVs → rich business metadata + file types")
-        elif hasattr(self.source_client, 'organized_files_dir'):
-            # Salesforce source
-            self.logger.info(f"📊 Basic classification: CSV deal mapping → rich business metadata + file types")
-        elif hasattr(self.source_client, 'base_path'):
-            # Local filesystem source
-            self.logger.info(f"📊 Basic classification: Directory structure → business metadata + file types")
-        else:
-            # Dropbox source
-            self.logger.info(f"📊 Basic classification: File paths → business metadata + file types")
-            
-        self.logger.info(f"📊 Advanced classification: Phase 2 (LLM document types + content analysis)")
         self.logger.info(f"⏱️ Time elapsed: {elapsed}")
+        
+        # Display detailed summary
+        detailed_summary = self.persistence.get_detailed_summary()
+        self._display_detailed_summary(detailed_summary)
         self.logger.info(f"💾 Results saved to: {args.output}")
     
     def _convert_metadata_to_dict(self, doc_metadata: DocumentMetadata) -> Dict[str, Any]:
@@ -400,17 +432,89 @@ class DocumentDiscovery:
             }
         }
     
-    def _display_summary(self, summary: Dict[str, Any]):
-        """Display discovery summary"""
+    def _display_summary(self, summary: Dict[str, Any]) -> None:
+        """Display discovery summary.
+        
+        Args:
+            summary: Discovery summary dictionary.
+        """
         self.logger.info(f"\n📊 Discovery Summary:")
         self.logger.info(f"📂 Source: {summary['source_type']} ({summary['source_path']})")
         self.logger.info(f"📄 Total documents: {summary['total_documents']}")
         self.logger.info(f"🏷️ LLM classification: Handled by processing pipeline")
         self.logger.info(f"💾 Output file: {summary.get('output_file', 'N/A')}")
+    
+    def _display_detailed_summary(self, summary: Dict[str, Any]) -> None:
+        """Display comprehensive discovery summary with statistics.
+        
+        Shows date ranges, file type distribution, size statistics,
+        and other detailed metrics.
+        
+        Args:
+            summary: Discovery summary dictionary with detailed statistics.
+        """
+        print(f"\n{'='*70}")
+        print(f"📊 DISCOVERY SUMMARY")
+        print(f"{'='*70}")
+        print(f"📂 Source: {summary['source_type']}")
+        print(f"📁 Path: {summary['source_path']}")
+        print(f"📄 Total documents: {summary['total_documents']:,}")
+        print(f"💾 Output file: {summary.get('output_file', 'N/A')}")
+        
+        detailed = summary.get('detailed_statistics', {})
+        
+        # Date Range Analysis
+        date_range = detailed.get('date_range', {})
+        if date_range:
+            print(f"\n📅 DATE RANGE ANALYSIS:")
+            print(f"   Earliest year: {date_range.get('earliest_year', 'N/A')}")
+            print(f"   Latest year: {date_range.get('latest_year', 'N/A')}")
+            print(f"   Pre-2000 documents: {date_range.get('pre_2000_count', 0):,}")
+            print(f"   Year 2000+: {date_range.get('2000_and_later_count', 0):,}")
+        
+        # Year Distribution
+        year_dist = detailed.get('year_distribution', {})
+        if year_dist:
+            print(f"\n📆 DOCUMENTS BY YEAR:")
+            # Sort years and show in columns
+            sorted_years = sorted([y for y in year_dist.keys() if y != "no_date"])
+            for year in sorted_years:
+                count = year_dist[year]
+                bar = "█" * min(50, int(count / max(year_dist.values()) * 50)) if max(year_dist.values()) > 0 else ""
+                print(f"   {year}: {count:>6,} {bar}")
+            if "no_date" in year_dist:
+                print(f"   No date: {year_dist['no_date']:>6,}")
+        
+        # File Type Distribution
+        file_dist = detailed.get('file_type_distribution', {})
+        if file_dist:
+            print(f"\n📁 FILE TYPES:")
+            for file_type, count in sorted(file_dist.items(), key=lambda x: x[1], reverse=True)[:15]:
+                pct = 100 * count / summary['total_documents'] if summary['total_documents'] > 0 else 0
+                print(f"   {file_type:<10} {count:>8,} ({pct:>5.1f}%)")
+            if len(file_dist) > 15:
+                print(f"   ... and {len(file_dist) - 15} more file types")
+        
+        # Size Statistics
+        size_stats = detailed.get('size_statistics', {})
+        if size_stats:
+            print(f"\n💾 SIZE STATISTICS:")
+            print(f"   Total size: {size_stats.get('total_size_mb', 0):,.1f} MB ({size_stats.get('total_size_mb', 0)/1024:.1f} GB)")
+            print(f"   Average size: {size_stats.get('avg_size_mb', 0):.2f} MB")
+            print(f"   Largest file: {size_stats.get('max_size_mb', 0):.2f} MB")
+            print(f"   Smallest file: {size_stats.get('min_size_mb', 0):.2f} MB")
+            print(f"   Files > 10MB: {size_stats.get('files_over_10mb', 0):,}")
+            print(f"   Files > 50MB: {size_stats.get('files_over_50mb', 0):,}")
+        
+        print(f"\n{'='*70}")
 
 
-def create_argument_parser():
-    """Create command line argument parser"""
+def create_argument_parser() -> argparse.ArgumentParser:
+    """Create command line argument parser.
+    
+    Returns:
+        Configured ArgumentParser instance with all discovery options.
+    """
     parser = argparse.ArgumentParser(
         description="Phase 1: Discovery with Basic Classification (file enumeration + business metadata)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -476,9 +580,11 @@ Classification Phases:
                        help="Optional path to Vendor ID -> Name mapping CSV (for salesforce/salesforce_raw source)")
     parser.add_argument("--deal-mapping-csv", type=str,
                        help="Optional path to organized_files_to_deal_mapping.csv for user-friendly deal numbers (for salesforce_raw source)")
-    parser.add_argument("--require-deal-association", action="store_true",
-                       help="Only process documents with valid deal associations (for salesforce_raw source). "
-                            "Ensures all metadata fields are populated. Default: False (process all documents)")
+    parser.add_argument("--require-deal-association", action="store_true", default=True,
+                       help="Only process documents with valid deal associations. "
+                            "Default: True for 'salesforce' source, False for 'salesforce_raw'.")
+    parser.add_argument("--include-unmapped", action="store_true",
+                       help="Include files without deal associations (overrides --require-deal-association)")
     
     # Raw Salesforce export options
     parser.add_argument("--export-root-dir", type=str,
@@ -491,8 +597,8 @@ Classification Phases:
                        help="Path to content_document_links.csv (for salesforce_raw source)")
     
     # Discovery options
-    parser.add_argument("--batch-size", type=int, default=100,
-                       help="Number of documents per batch (default: 100)")
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE,
+                       help=f"Number of documents per batch (default: {DEFAULT_BATCH_SIZE})")
     parser.add_argument("--max-docs", type=int,
                        help="Maximum documents to discover (for testing)")
     
@@ -500,15 +606,17 @@ Classification Phases:
     parser.add_argument("--output", type=str, default="discovery.json",
                        help="Output JSON file. Date auto-appended if not present (e.g., discovery.json → discovery_12_05_2025.json)")
     
-    # Resume option
+    # Summary and resume options
+    parser.add_argument("--show-summary", action="store_true",
+                       help="Display detailed summary of an existing discovery file (does not run discovery)")
     parser.add_argument("--resume", action="store_true",
                        help="Resume from previous discovery")
     
     return parser
 
 
-def main():
-    """Main entry point"""
+def main() -> None:
+    """Main entry point for document discovery script."""
     parser = create_argument_parser()
     args = parser.parse_args()
     

@@ -39,7 +39,9 @@ class SalesforceFileSource(FileSourceInterface):
                  file_mapping_csv: str,
                  deal_metadata_csv: str,
                  client_mapping_csv: Optional[str] = None,
-                 vendor_mapping_csv: Optional[str] = None):
+                 vendor_mapping_csv: Optional[str] = None,
+                 require_deal_association: bool = True,
+                 min_file_size_kb: float = 10.0):
         """
         Initialize Salesforce file source with metadata mappings.
         
@@ -49,6 +51,8 @@ class SalesforceFileSource(FileSourceInterface):
             deal_metadata_csv: Path to Deal__c.csv from Salesforce export
             client_mapping_csv: Optional path to Client ID -> Name mapping CSV
             vendor_mapping_csv: Optional path to Vendor ID -> Name mapping CSV
+            require_deal_association: If True, only yield files mapped to deals (default: True)
+            min_file_size_kb: Minimum file size in KB to process (default: 10KB to skip icons/logos)
         """
         super().__init__()
         
@@ -57,6 +61,9 @@ class SalesforceFileSource(FileSourceInterface):
         self.deal_metadata_csv = deal_metadata_csv
         self.client_mapping_csv = client_mapping_csv
         self.vendor_mapping_csv = vendor_mapping_csv
+        self.require_deal_association = require_deal_association
+        self.min_file_size_kb = min_file_size_kb
+        self.min_file_size_bytes = int(min_file_size_kb * 1024)  # Convert to bytes
         
         # Loaded data caches
         self._file_to_deal_mapping: Optional[Dict] = None
@@ -160,7 +167,16 @@ class SalesforceFileSource(FileSourceInterface):
                 
                 # Narrative content (for processing phase)
                 'current_narrative': row.get('Current_Narrative__c', ''),
-                'customer_comments': row.get('Comments_To_Customer__c', '')
+                'customer_comments': row.get('Comments_To_Customer__c', ''),
+                
+                # Deal Classification Fields (December 2025 - for Pinecone filtering)
+                'report_type': row.get('Report_Type__c', ''),
+                'project_type': row.get('Project_Type__c', ''),
+                'competition': row.get('Competition__c', ''),
+                'npi_analyst': row.get('NPI_Analyst__c', ''),
+                'dual_multi_sourcing': row.get('Dual_Multi_sourcing_strategy__c', ''),
+                'time_pressure': row.get('Time_Pressure__c', ''),
+                'advisor_network_used': row.get('Was_Advisor_Network_SME_Used__c', '')
             }
         
         self.logger.info(f"Loaded {len(self._deal_metadata)} deal records")
@@ -169,17 +185,23 @@ class SalesforceFileSource(FileSourceInterface):
         if self.client_mapping_csv:
             self.logger.info(f"Loading client mapping from {self.client_mapping_csv}")
             client_df = pd.read_csv(self.client_mapping_csv)
-            # Assuming CSV has 'Id' and 'Name' columns
-            self._client_mapping = dict(zip(client_df['Id'], client_df['Name']))
-            self.logger.info(f"Loaded {len(self._client_mapping)} client mappings")
+            # Handle both column name formats: 'Id'/'Name' (December) vs 'Account ID'/'Account Name' (August)
+            id_col = 'Account ID' if 'Account ID' in client_df.columns else 'Id'
+            name_col = 'Account Name' if 'Account Name' in client_df.columns else 'Name'
+            # Truncate IDs to 15 chars for consistent matching (SF IDs can be 15 or 18 chars)
+            self._client_mapping = dict(zip(client_df[id_col].astype(str).str[:15], client_df[name_col]))
+            self.logger.info(f"Loaded {len(self._client_mapping)} client mappings (using {id_col}/{name_col} columns)")
         
         # Load vendor mapping if available
         if self.vendor_mapping_csv:
             self.logger.info(f"Loading vendor mapping from {self.vendor_mapping_csv}")
             vendor_df = pd.read_csv(self.vendor_mapping_csv)
-            # Assuming CSV has 'Id' and 'Name' columns
-            self._vendor_mapping = dict(zip(vendor_df['Id'], vendor_df['Name']))
-            self.logger.info(f"Loaded {len(self._vendor_mapping)} vendor mappings")
+            # Handle both column name formats: 'Id'/'Name' (December) vs 'Account ID'/'Account Name' (August)
+            id_col = 'Account ID' if 'Account ID' in vendor_df.columns else 'Id'
+            name_col = 'Account Name' if 'Account Name' in vendor_df.columns else 'Name'
+            # Truncate IDs to 15 chars for consistent matching (SF IDs can be 15 or 18 chars)
+            self._vendor_mapping = dict(zip(vendor_df[id_col].astype(str).str[:15], vendor_df[name_col]))
+            self.logger.info(f"Loaded {len(self._vendor_mapping)} vendor mappings (using {id_col}/{name_col} columns)")
     
     def _to_str_or_none(self, value) -> Optional[str]:
         """Convert value to string, handling NaN and None"""
@@ -342,11 +364,12 @@ class SalesforceFileSource(FileSourceInterface):
         doc_metadata.vendor_name = deal_mapping.get('vendor_name') or None
         
         # Priority 2: Fallback to separate mapping files if available and enhanced mapping is empty
+        # Note: Salesforce IDs can be 15-char or 18-char; truncate to 15 for consistent matching
         if not doc_metadata.client_name and self._client_mapping and raw_client_id:
-            doc_metadata.client_name = self._client_mapping.get(raw_client_id)
+            doc_metadata.client_name = self._client_mapping.get(raw_client_id[:15])
         
         if not doc_metadata.vendor_name and self._vendor_mapping and raw_vendor_id:
-            doc_metadata.vendor_name = self._vendor_mapping.get(raw_vendor_id)
+            doc_metadata.vendor_name = self._vendor_mapping.get(raw_vendor_id[:15])
         
         # Set friendly IDs for filtering/display
         # Use client_name if available, otherwise fallback to shortened raw ID
@@ -373,6 +396,15 @@ class SalesforceFileSource(FileSourceInterface):
         doc_metadata.current_narrative = deal_data.get('current_narrative')
         doc_metadata.customer_comments = deal_data.get('customer_comments')
         doc_metadata.content_source = "document_file"  # Default for regular files
+        
+        # Deal Classification Fields (December 2025 - for Pinecone filtering)
+        doc_metadata.report_type = self._to_str_or_none(deal_data.get('report_type'))
+        doc_metadata.project_type = self._to_str_or_none(deal_data.get('project_type'))
+        doc_metadata.competition = self._to_str_or_none(deal_data.get('competition'))
+        doc_metadata.npi_analyst = self._to_str_or_none(deal_data.get('npi_analyst'))
+        doc_metadata.dual_multi_sourcing = self._to_str_or_none(deal_data.get('dual_multi_sourcing'))
+        doc_metadata.time_pressure = self._to_str_or_none(deal_data.get('time_pressure'))
+        doc_metadata.advisor_network_used = self._to_str_or_none(deal_data.get('advisor_network_used'))
         
         # Salesforce-specific
         doc_metadata.salesforce_content_version_id = deal_mapping['salesforce_id']
@@ -483,6 +515,11 @@ class SalesforceFileSource(FileSourceInterface):
                 try:
                     # Get file stats
                     stat = file_path.stat()
+                    
+                    # Skip files smaller than minimum size (likely icons/logos)
+                    if stat.st_size < self.min_file_size_bytes:
+                        continue
+                    
                     relative_path = str(file_path.relative_to(self.organized_files_dir))
                     
                     # Create basic FileMetadata
@@ -517,6 +554,10 @@ class SalesforceFileSource(FileSourceInterface):
                         self.logger.info(f"📊 Discovery stats: {mapping_stats['total_files']:,} files processed, "
                                        f"{mapping_stats['mapped_files']:,} mapped ({mapped_pct:.1f}%), "
                                        f"{mapping_stats['unmapped_files']:,} unmapped")
+                    
+                    # Filter: Skip unmapped files if require_deal_association is True
+                    if self.require_deal_association and doc_metadata.mapping_status != "mapped":
+                        continue
                     
                     yield doc_metadata
                     
