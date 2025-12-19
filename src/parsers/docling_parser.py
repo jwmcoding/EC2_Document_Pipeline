@@ -20,14 +20,13 @@ from __future__ import annotations
 import json
 import logging
 import platform
-import re
 import signal
 import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from src.parsers.pdfplumber_parser import ParsedContent
 from src.parsers.table_formatter import format_table_for_chunking
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 try:
     # Core Docling converter
     from docling.document_converter import DocumentConverter as DoclingDocumentConverter
-    from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
+    from docling.datamodel.pipeline_options import PdfPipelineOptions, OcrOptions
     from docling.document_converter import PdfFormatOption
 
     DOCLING_AVAILABLE = True
@@ -70,75 +69,6 @@ def is_docling_available() -> bool:
     return DOCLING_AVAILABLE
 
 
-def _compute_quality_metrics(
-    text: str, table_count: int
-) -> Dict[str, Any]:
-    """
-    Compute quality metrics for pass1 output.
-    
-    Returns:
-        Dict with text_chars, word_count, alnum_ratio, table_count
-    """
-    text_chars = len(text)
-    words = re.findall(r'\b\w+\b', text)
-    word_count = len(words)
-    
-    # Compute alphanumeric ratio (alnum chars / total chars, excluding whitespace)
-    text_no_ws = re.sub(r'\s+', '', text)
-    if text_no_ws:
-        alnum_chars = len(re.findall(r'[a-zA-Z0-9]', text_no_ws))
-        alnum_ratio = alnum_chars / len(text_no_ws)
-    else:
-        alnum_ratio = 0.0
-    
-    return {
-        "text_chars": text_chars,
-        "word_count": word_count,
-        "alnum_ratio": alnum_ratio,
-        "table_count": table_count,
-    }
-
-
-def _check_pass1_quality(
-    text: str,
-    table_count: int,
-    min_text_chars: int = 800,
-    min_word_count: int = 150,
-    alnum_threshold: float = 0.5,
-) -> bool:
-    """
-    Evaluate whether pass1 output is sufficient (no OCR needed).
-    
-    Checks:
-    1. Minimum content volume: require at least min_text_chars OR min_word_count
-    2. Text quality ratio: require alnum_ratio >= threshold
-    3. Table signal: if table_count == 0 AND text volume is low, treat as failed
-    
-    Returns:
-        True if pass1 is sufficient, False if OCR fallback is needed
-    """
-    metrics = _compute_quality_metrics(text, table_count)
-    
-    # Check 1: Minimum content volume
-    has_min_content = (
-        metrics["text_chars"] >= min_text_chars
-        or metrics["word_count"] >= min_word_count
-    )
-    
-    # Check 2: Text quality ratio
-    has_good_quality = metrics["alnum_ratio"] >= alnum_threshold
-    
-    # Check 3: Table signal (if no tables and low text, likely scanned)
-    has_table_signal = (
-        metrics["table_count"] > 0
-        or metrics["text_chars"] >= min_text_chars
-        or metrics["word_count"] >= min_word_count
-    )
-    
-    # Pass if all checks succeed
-    return has_min_content and has_good_quality and has_table_signal
-
-
 class DoclingParser:
     """
     PDF parser backed by Docling's ``DocumentConverter``.
@@ -152,45 +82,19 @@ class DoclingParser:
     them in ``ParsedContent``. That keeps the DocumentProcessor API uniform.
     """
 
-    def __init__(
-        self,
-        ocr_mode: Optional[Literal["auto", "on", "off"]] = None,
-        ocr: Optional[bool] = None,  # Backward compatibility
-        timeout_seconds: int = 240,
-        min_text_chars: int = 800,
-        min_word_count: int = 150,
-        alnum_threshold: float = 0.5,
-    ) -> None:
+    def __init__(self, ocr: bool = True, ocr_mode: Optional[str] = None, timeout_seconds: int = 240, **kwargs) -> None:
         """
         Initialize the Docling-backed parser.
 
         Args:
-            ocr_mode: OCR behavior mode:
-                - "auto": Try non-OCR first, fallback to OCR if quality checks fail (default)
-                - "on": Always use OCR (legacy behavior)
-                - "off": Never use OCR
-            ocr: DEPRECATED - use ocr_mode instead. If provided, maps to ocr_mode:
-                - True -> "on"
-                - False -> "off"
-            timeout_seconds: Total timeout cap for PDF conversion (split between passes in AUTO mode).
-            min_text_chars: Minimum character count for pass1 success (AUTO mode).
-            min_word_count: Minimum word count for pass1 success (AUTO mode).
-            alnum_threshold: Minimum alphanumeric ratio for pass1 success (AUTO mode).
+            ocr: Enable Docling OCR for scanned PDFs (recommended for contracts).
+            ocr_mode: Optional OCR mode string ("on", "off", "auto") - if provided, overrides ocr boolean.
+            timeout_seconds: Hard timeout for an individual PDF conversion.
+            **kwargs: Ignored for backward compatibility.
         """
-        # Backward compatibility: convert old `ocr` bool to `ocr_mode`
-        if ocr_mode is None:
-            if ocr is not None:
-                # Legacy parameter provided
-                ocr_mode = "on" if ocr else "off"
-                self.logger.warning(
-                    "DoclingParser: 'ocr' parameter is deprecated, use 'ocr_mode' instead. "
-                    "Mapping ocr=%s to ocr_mode='%s'",
-                    ocr,
-                    ocr_mode,
-                )
-            else:
-                # Default to AUTO mode
-                ocr_mode = "auto"
+        # Handle ocr_mode parameter for backward compatibility
+        if ocr_mode is not None:
+            ocr = ocr_mode.lower() in ("on", "auto")
 
         self.logger = logging.getLogger(__name__)
 
@@ -201,79 +105,73 @@ class DoclingParser:
             )
 
         self.timeout_seconds = timeout_seconds
-        self.ocr_mode = ocr_mode
-        self.min_text_chars = min_text_chars
-        self.min_word_count = min_word_count
-        self.alnum_threshold = alnum_threshold
 
-        # Create converter without OCR (for pass1 in AUTO mode, or when ocr_mode="off")
-        self.converter_no_ocr = self._create_converter(ocr_enabled=False)
-
-        # Create converter with OCR (for pass2 in AUTO mode, or when ocr_mode="on")
-        if ocr_mode in ("auto", "on"):
-            self.converter_ocr = self._create_converter(ocr_enabled=True)
-        else:
-            self.converter_ocr = None
-
-        # For backward compatibility: if ocr_mode="on", use OCR converter as primary
-        if ocr_mode == "on":
-            self.converter = self.converter_ocr
-        else:
-            self.converter = self.converter_no_ocr
-
-        self.logger.info(
-            "DoclingParser initialized with ocr_mode=%s (timeout=%ss)",
-            ocr_mode,
-            timeout_seconds,
-        )
-
-    def _create_converter(self, ocr_enabled: bool) -> Any:
-        """Create a Docling converter with specified OCR settings."""
-        try:
-            pipeline_options = PdfPipelineOptions()
-            
-            # Always enable TableFormer ACCURATE for table fidelity
-            pipeline_options.do_table_structure = True
-            pipeline_options.table_structure_options.mode = TableFormerMode.ACCURATE
-            pipeline_options.table_structure_options.do_cell_matching = True
-            
-            if ocr_enabled:
+        # Configure Docling PDF pipeline with robust OCR defaults when enabled.
+        # NOTE: GPU acceleration is automatic in Docling - it detects and uses
+        # MPS (Apple Silicon) or CUDA when available.
+        if ocr:
+            try:
+                pipeline_options = PdfPipelineOptions()
                 pipeline_options.do_ocr = True
                 pipeline_options.images_scale = 2.0  # 2x scale for better OCR
                 
-                # OCR settings for scanned documents
-                # Try EasyOCR first (better accuracy), then Tesseract, then default
+                # Enable TableFormer ACCURATE mode for high-quality table extraction
                 try:
-                    from docling.datamodel.pipeline_options import EasyOcrOptions
-                    pipeline_options.ocr_options = EasyOcrOptions(
-                        lang=["en"],
-                        force_full_page_ocr=True,
-                        confidence_threshold=0.5,
+                    from docling.datamodel.pipeline_options import TableFormerMode
+                    pipeline_options.do_table_structure = True
+                    pipeline_options.table_structure_options.mode = TableFormerMode.ACCURATE
+                    pipeline_options.table_structure_options.do_cell_matching = True
+                    self.logger.info(
+                        "DoclingParser: TableFormer ACCURATE mode enabled "
+                        "(do_table_structure=%s, mode=%s, do_cell_matching=%s)",
+                        pipeline_options.do_table_structure,
+                        pipeline_options.table_structure_options.mode,
+                        pipeline_options.table_structure_options.do_cell_matching,
                     )
-                    self.logger.debug("DoclingParser: Using EasyOCR backend")
-                except ImportError:
-                    try:
-                        from docling.datamodel.pipeline_options import TesseractCliOcrOptions
-                        pipeline_options.ocr_options = TesseractCliOcrOptions(
-                            lang=["eng"],
-                            force_full_page_ocr=True,
-                        )
-                        self.logger.debug("DoclingParser: Using Tesseract OCR backend")
-                    except ImportError:
-                        self.logger.warning(
-                            "DoclingParser: No OCR options available (install easyocr for better results)"
-                        )
+                except (ImportError, AttributeError) as e:
+                    # TableFormer options not available in this Docling version
+                    self.logger.warning(
+                        "DoclingParser: TableFormer options not available (%s). "
+                        "Tables may not be extracted correctly.",
+                        e,
+                    )
+                
+                pipeline_options.ocr_options = OcrOptions(
+                    lang=["en"],
+                    force_full_page_ocr=True,
+                    bitmap_area_threshold=0.0,
+                    use_gpu=True,
+                )
 
-            return DoclingDocumentConverter(
-                format_options={PdfFormatOption: pipeline_options}
+                # Prefer EasyOCR backend when available for tough scans.
+                try:
+                    from docling.backend.ocr_backend import EasyOcrBackend  # type: ignore[import]
+
+                    pipeline_options.ocr_options.ocr_backend = EasyOcrBackend()
+                    self.logger.info("DoclingParser: Using EasyOCR backend for OCR")
+                except Exception:
+                    # Fallback to the default OCR backend configured in Docling.
+                    self.logger.info("DoclingParser: Using default OCR backend")
+
+                self.converter = DoclingDocumentConverter(
+                    format_options={PdfFormatOption: pipeline_options}
+                )
+                self.logger.info(
+                    "DoclingParser initialized with FULL-PAGE OCR enabled (timeout=%ss)",
+                    timeout_seconds,
+                )
+            except Exception as e:
+                self.logger.warning(
+                    "DoclingParser: failed to configure OCR options (%s). "
+                    "Falling back to default converter without custom pipeline.",
+                    e,
+                )
+                self.converter = DoclingDocumentConverter()
+        else:
+            self.converter = DoclingDocumentConverter()
+            self.logger.info(
+                "DoclingParser initialized without OCR (timeout=%ss)", timeout_seconds
             )
-        except Exception as e:
-            self.logger.warning(
-                "DoclingParser: failed to configure pipeline options (%s). "
-                "Falling back to default converter.",
-                e,
-            )
-            return DoclingDocumentConverter()
 
     # --------------------------------------------------------------------- #
     # Public API
@@ -323,168 +221,14 @@ class DoclingParser:
     def _parse_pdf_content(
         self, content: bytes, metadata: Dict[str, Any]
     ) -> ParsedContent:
-        """
-        Parse PDF content using Docling with two-pass AUTO OCR support.
-        
-        In AUTO mode:
-        - Pass1: Try without OCR (fast path for digitally-native PDFs)
-        - Pass2: Fallback to OCR if pass1 quality checks fail
-        
-        Timeout is split between passes to maintain total cap.
-        """
-        
-        # Handle non-AUTO modes directly
-        if self.ocr_mode == "off":
-            return self._parse_single_pass(content, metadata, use_ocr=False, pass_num=1)
-        elif self.ocr_mode == "on":
-            return self._parse_single_pass(content, metadata, use_ocr=True, pass_num=1)
-        
-        # AUTO mode: two-pass with quality checks
-        # Split timeout: pass1 gets 20s (fast path for digitally-native PDFs), pass2 gets remainder
-        # If Pass1 takes >20s, it's likely scanned/complex and will need OCR anyway
-        pass1_timeout = min(20, int(self.timeout_seconds * 0.15))  # 15% of total, max 20s
-        pass2_timeout = self.timeout_seconds - pass1_timeout
-        
-        # Pass1: Try without OCR
-        self.logger.debug(
-            "DoclingParser AUTO: Pass1 (OCR off) for '%s'",
-            metadata.get("name") or metadata.get("path") or "unknown",
-        )
-        pass1_result = self._parse_single_pass(
-            content, metadata, use_ocr=False, pass_num=1, timeout_seconds=pass1_timeout
-        )
-        
-        # Check if Pass1 resulted in timeout/error - if so, skip quality check and go straight to Pass2
-        if pass1_result.metadata.get("parser", "").startswith("docling_timeout") or \
-           pass1_result.metadata.get("parser", "").startswith("docling_fallback") or \
-           pass1_result.metadata.get("error"):
-            self.logger.info(
-                "DoclingParser AUTO: Pass1 timed out or failed, trying Pass2 with OCR"
-            )
-            # Skip quality checks and go straight to Pass2
-            if self.converter_ocr is None:
-                self.logger.warning(
-                    "DoclingParser AUTO: Pass1 failed but OCR converter not available, returning pass1 result"
-                )
-                pass1_result.metadata.update({
-                    "docling_ocr_mode": "auto",
-                    "docling_ocr_used": False,
-                    "docling_pass_used": 1,
-                    "docling_ocr_fallback_failed": True,
-                })
-                return pass1_result
-            
-            pass2_result = self._parse_single_pass(
-                content, metadata, use_ocr=True, pass_num=2, timeout_seconds=pass2_timeout
-            )
-            
-            pass2_text = pass2_result.text
-            pass2_table_count = len(pass2_result.tables) if pass2_result.tables else 0
-            pass2_metrics = _compute_quality_metrics(pass2_text, pass2_table_count)
-            
-            pass2_result.metadata.update({
-                "docling_ocr_mode": "auto",
-                "docling_ocr_used": True,
-                "docling_pass_used": 2,
-                "docling_text_chars": pass2_metrics["text_chars"],
-                "docling_word_count": pass2_metrics["word_count"],
-                "docling_alnum_ratio": pass2_metrics["alnum_ratio"],
-                "docling_table_count": pass2_metrics["table_count"],
-            })
-            
-            return pass2_result
-        
-        # Check pass1 quality (only if Pass1 didn't timeout/error)
-        pass1_text = pass1_result.text or ""
-        pass1_table_count = len(pass1_result.tables) if pass1_result.tables else 0
-        pass1_metrics = _compute_quality_metrics(pass1_text, pass1_table_count)
-        
-        if _check_pass1_quality(
-            pass1_text,
-            pass1_table_count,
-            self.min_text_chars,
-            self.min_word_count,
-            self.alnum_threshold,
-        ):
-            # Pass1 succeeded - return with metrics
-            self.logger.info(
-                "DoclingParser AUTO: Pass1 sufficient (chars=%d, words=%d, tables=%d, alnum=%.2f)",
-                pass1_metrics["text_chars"],
-                pass1_metrics["word_count"],
-                pass1_metrics["table_count"],
-                pass1_metrics["alnum_ratio"],
-            )
-            pass1_result.metadata.update({
-                "docling_ocr_mode": "auto",
-                "docling_ocr_used": False,
-                "docling_pass_used": 1,
-                "docling_text_chars": pass1_metrics["text_chars"],
-                "docling_word_count": pass1_metrics["word_count"],
-                "docling_alnum_ratio": pass1_metrics["alnum_ratio"],
-                "docling_table_count": pass1_metrics["table_count"],
-            })
-            return pass1_result
-        
-        # Pass1 failed quality checks - try pass2 with OCR
-        if self.converter_ocr is None:
-            self.logger.warning(
-                "DoclingParser AUTO: Pass1 failed but OCR converter not available, returning pass1 result"
-            )
-            pass1_result.metadata.update({
-                "docling_ocr_mode": "auto",
-                "docling_ocr_used": False,
-                "docling_pass_used": 1,
-                "docling_text_chars": pass1_metrics["text_chars"],
-                "docling_word_count": pass1_metrics["word_count"],
-                "docling_alnum_ratio": pass1_metrics["alnum_ratio"],
-                "docling_table_count": pass1_metrics["table_count"],
-                "docling_ocr_fallback_failed": True,
-            })
-            return pass1_result
-        
-        self.logger.info(
-            "DoclingParser AUTO: Pass1 insufficient (chars=%d, words=%d, tables=%d, alnum=%.2f), trying Pass2 with OCR",
-            pass1_metrics["text_chars"],
-            pass1_metrics["word_count"],
-            pass1_metrics["table_count"],
-            pass1_metrics["alnum_ratio"],
-        )
-        
-        pass2_result = self._parse_single_pass(
-            content, metadata, use_ocr=True, pass_num=2, timeout_seconds=pass2_timeout
-        )
-        
-        pass2_text = pass2_result.text
-        pass2_table_count = len(pass2_result.tables)
-        pass2_metrics = _compute_quality_metrics(pass2_text, pass2_table_count)
-        
-        pass2_result.metadata.update({
-            "docling_ocr_mode": "auto",
-            "docling_ocr_used": True,
-            "docling_pass_used": 2,
-            "docling_text_chars": pass2_metrics["text_chars"],
-            "docling_word_count": pass2_metrics["word_count"],
-            "docling_alnum_ratio": pass2_metrics["alnum_ratio"],
-            "docling_table_count": pass2_metrics["table_count"],
-        })
-        
-        return pass2_result
-
-    def _parse_single_pass(
-        self,
-        content: bytes,
-        metadata: Dict[str, Any],
-        use_ocr: bool,
-        pass_num: int,
-        timeout_seconds: Optional[int] = None,
-    ) -> ParsedContent:
-        """Parse PDF content using a single Docling pass (with or without OCR)."""
+        """Parse PDF content using Docling with a hard timeout."""
 
         @contextmanager
-        def timeout_context(timeout_sec: int):
+        def timeout_context(timeout_seconds: int):
             """Unix-only timeout guard; no-op on Windows."""
 
             if platform.system() == "Windows":
+                # Windows does not support SIGALRM; skip timeout but log it.
                 self.logger.debug(
                     "DoclingParser: Windows detected - timeout guard disabled"
                 )
@@ -493,19 +237,17 @@ class DoclingParser:
 
             def timeout_handler(signum, frame):  # pragma: no cover - signal path
                 raise TimeoutError(
-                    f"Docling PDF processing exceeded {timeout_sec} seconds"
+                    f"Docling PDF processing exceeded {timeout_seconds} seconds"
                 )
 
             old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(timeout_sec)
+            signal.alarm(timeout_seconds)
             try:
                 yield
             finally:
                 signal.alarm(0)
                 signal.signal(signal.SIGALRM, old_handler)
 
-        timeout_sec = timeout_seconds or self.timeout_seconds
-        converter = self.converter_ocr if use_ocr else self.converter_no_ocr
         tmp_path: Optional[Path] = None
 
         try:
@@ -520,156 +262,163 @@ class DoclingParser:
             tables: List[Dict[str, Any]] = []
             page_info: List[Dict[str, Any]] = []
 
-            try:
-                with timeout_context(timeout_sec):
-                    start_ts = time.time()
+            with timeout_context(self.timeout_seconds):
+                start_ts = time.time()
 
-                    self.logger.debug(
-                        "DoclingParser: Pass%d converting PDF '%s' (OCR=%s)",
-                        pass_num,
-                        metadata.get("name") or metadata.get("path") or tmp_path.name,
-                        use_ocr,
+                self.logger.info(
+                    "DoclingParser: converting PDF '%s'",
+                    metadata.get("name") or metadata.get("path") or tmp_path.name,
+                )
+                result = self.converter.convert(str(tmp_path))
+                doc = result.document
+
+                # Primary text representation
+                markdown_text: str = doc.export_to_markdown() or ""
+
+                # Lossless DocTags JSON for structural information (tables, pages, etc.)
+                lossless_json: Dict[str, Any] = {}
+                try:
+                    # Some Docling versions expose export_to_dict_json, others export_to_dict
+                    if hasattr(doc, "export_to_dict_json"):
+                        lossless_json = json.loads(doc.export_to_dict_json())  # type: ignore[attr-defined]
+                    elif hasattr(doc, "export_to_dict"):
+                        lossless_json = doc.export_to_dict()  # type: ignore[attr-defined]
+                except Exception as e:
+                    self.logger.warning(
+                        "DoclingParser: failed to export lossless JSON: %s", e
                     )
-                    result = converter.convert(str(tmp_path))
-                    doc = result.document
+                    lossless_json = {}
 
-                    # Primary text representation
-                    markdown_text: str = doc.export_to_markdown() or ""
+                # Extract page count from JSON if available
+                page_count = self._extract_page_count(lossless_json)
 
-                    # Lossless DocTags JSON for structural information (tables, pages, etc.)
-                    lossless_json: Dict[str, Any] = {}
-                    try:
-                        # Some Docling versions expose export_to_dict_json, others export_to_dict
-                        if hasattr(doc, "export_to_dict_json"):
-                            lossless_json = json.loads(doc.export_to_dict_json())  # type: ignore[attr-defined]
-                        elif hasattr(doc, "export_to_dict"):
-                            lossless_json = doc.export_to_dict()  # type: ignore[attr-defined]
-                    except Exception as e:
-                        self.logger.warning(
-                            "DoclingParser: failed to export lossless JSON: %s", e
+                # Normalize tables from structural JSON; if nothing found, we
+                # still return markdown-only content.
+                normalized_tables = self._normalize_tables_from_lossless(lossless_json)
+                
+                # Debug logging for table extraction
+                self.logger.debug(
+                    "DoclingParser: Extracted %d tables from lossless JSON (lossless_json keys: %s)",
+                    len(normalized_tables),
+                    list(lossless_json.keys()) if lossless_json else "empty",
+                )
+                if normalized_tables:
+                    for i, tbl in enumerate(normalized_tables):
+                        self.logger.debug(
+                            "DoclingParser: Table %d: page=%d, rows=%d, cols=%d, "
+                            "sample_data=%s",
+                            i + 1,
+                            tbl.page,
+                            tbl.row_count,
+                            tbl.col_count,
+                            str(tbl.data[0][:3]) if tbl.data and tbl.data[0] else "empty",
                         )
-                        lossless_json = {}
 
-                    # Extract page count from JSON if available
-                    page_count = self._extract_page_count(lossless_json)
+                # Build tables list for ParsedContent (schema-compatible with PDFPlumberParser)
+                table_dicts: List[Dict[str, Any]] = []
+                for tbl in normalized_tables:
+                    table_dicts.append(
+                        {
+                            "page": tbl.page,
+                            "table_index": tbl.table_index,
+                            "data": tbl.data,
+                            "rows": tbl.row_count,
+                            "cols": tbl.col_count,
+                            "contains_currency": tbl.contains_currency,
+                        }
+                    )
 
-                    # Normalize tables from structural JSON; if nothing found, we
-                    # still return markdown-only content.
-                    normalized_tables = self._normalize_tables_from_lossless(lossless_json)
-
-                    # Build tables list for ParsedContent (schema-compatible with PDFPlumberParser)
-                    table_dicts: List[Dict[str, Any]] = []
+                # Format tables using the unified formatter so the chunker
+                # recognizes them. We append them at the end of the markdown
+                # to avoid disrupting Docling's own layout while still
+                # ensuring tables are preserved as dedicated table sections.
+                text_parts: List[str] = [markdown_text] if markdown_text else []
+                if table_dicts:
+                    text_parts.append("")  # Blank line before tables block
+                    text_parts.append("=== EXTRACTED TABLES (Docling) ===")
                     for tbl in normalized_tables:
-                        table_dicts.append(
+                        table_name = f"TABLE_P{tbl.page}_{tbl.table_index + 1}"
+                        # Use improved table formatting with better handling of merged cells
+                        formatted = format_table_for_chunking(
+                            tbl.data, table_name, page_num=tbl.page, deduplicate_merged=True
+                        )
+                        if formatted:
+                            text_parts.append("")
+                            text_parts.append(formatted)
+
+                full_text = "\n".join(text_parts) if text_parts else ""
+
+                # Minimal page_info based on page_count (we do not have width/height here).
+                if page_count is not None:
+                    for p in range(1, page_count + 1):
+                        page_info.append(
                             {
-                                "page": tbl.page,
-                                "table_index": tbl.table_index,
-                                "data": tbl.data,
-                                "rows": tbl.row_count,
-                                "cols": tbl.col_count,
-                                "contains_currency": tbl.contains_currency,
+                                "page_number": p,
+                                "text_length": None,
+                                "table_count": len(
+                                    [t for t in table_dicts if t["page"] == p]
+                                ),
                             }
                         )
 
-                    # Format tables using the unified formatter so the chunker
-                    # recognizes them. We append them at the end of the markdown
-                    # to avoid disrupting Docling's own layout while still
-                    # ensuring tables are preserved as dedicated table sections.
-                    text_parts: List[str] = [markdown_text] if markdown_text else []
-                    if table_dicts:
-                        text_parts.append("")  # Blank line before tables block
-                        text_parts.append("=== EXTRACTED TABLES (Docling) ===")
-                        for tbl in normalized_tables:
-                            table_name = f"TABLE_P{tbl.page}_{tbl.table_index + 1}"
-                            formatted = format_table_for_chunking(
-                                tbl.data, table_name, page_num=tbl.page
-                            )
-                            if formatted:
-                                text_parts.append("")
-                                text_parts.append(formatted)
-
-                    full_text = "\n".join(text_parts) if text_parts else ""
-
-                    # Minimal page_info based on page_count (we do not have width/height here).
-                    if page_count is not None:
-                        for p in range(1, page_count + 1):
-                            page_info.append(
-                                {
-                                    "page_number": p,
-                                    "text_length": None,
-                                    "table_count": len(
-                                        [t for t in table_dicts if t["page"] == p]
-                                    ),
-                                }
-                            )
-
-                    processing_time = time.time() - start_ts
-                    if processing_time > 10.0:
-                        self.logger.warning(
-                            "DoclingParser: Pass%d processing took %.1fs",
-                            pass_num,
-                            processing_time,
-                        )
-
-                    enhanced_metadata = {
-                        **metadata,
-                        "parser": "docling",
-                        "total_pages": page_count or len(page_info) or 0,
-                        "total_tables": len(table_dicts),
-                        "text_length": len(full_text),
-                        "processing_method": f"docling_extraction_pass{pass_num}",
-                    }
-
-                    return ParsedContent(
-                        text=full_text,
-                        metadata=enhanced_metadata,
-                        tables=table_dicts,
-                        page_info=page_info,
+                processing_time = time.time() - start_ts
+                if processing_time > 10.0:
+                    self.logger.warning(
+                        "DoclingParser: PDF processing took %.1fs - consider tuning or splitting document",
+                        processing_time,
                     )
 
-            except TimeoutError as e:
-                self.logger.error(
-                    "DoclingParser Pass%d timeout: %s", pass_num, e
-                )
-                # Return sentinel ParsedContent for timeout
+                enhanced_metadata = {
+                    **metadata,
+                    "parser": "docling",
+                    "total_pages": page_count or len(page_info) or 0,
+                    "total_tables": len(table_dicts),
+                    "text_length": len(full_text),
+                    "processing_method": "docling_extraction",
+                }
+
                 return ParsedContent(
-                    text=(
-                        f"Docling PDF processing (Pass{pass_num}) timed out after "
-                        f"{timeout_sec} seconds. "
-                        f"File may be corrupt or extremely complex: "
-                        f"{metadata.get('name', 'unknown')}"
-                    ),
-                    metadata={
-                        **metadata,
-                        "parser": f"docling_timeout_pass{pass_num}",
-                        "error": str(e),
-                        "processing_time": timeout_sec,
-                        "docling_ocr_mode": self.ocr_mode,
-                        "docling_ocr_used": use_ocr,
-                        "docling_pass_used": pass_num,
-                    },
+                    text=full_text,
+                    metadata=enhanced_metadata,
+                    tables=table_dicts,
+                    page_info=page_info,
                 )
-            except Exception as e:
-                self.logger.error(
-                    "DoclingParser Pass%d parsing failed: %s", pass_num, e
-                )
-                # Return fallback ParsedContent
-                fallback_text = (
-                    f"Docling extraction (Pass{pass_num}) failed: {str(e)}\n\n"
-                    f"File: {metadata.get('name', 'unknown')}\n"
-                    "This may indicate a corrupted or extremely complex PDF."
-                )
-                return ParsedContent(
-                    text=fallback_text,
-                    metadata={
-                        **metadata,
-                        "parser": f"docling_fallback_pass{pass_num}",
-                        "error": str(e),
-                        "docling_ocr_mode": self.ocr_mode,
-                        "docling_ocr_used": use_ocr,
-                        "docling_pass_used": pass_num,
-                    },
-                )
+
+        except TimeoutError as e:
+            self.logger.error("DoclingParser PDF processing timeout: %s", e)
+            # Return a sentinel ParsedContent so upstream logging and error
+            # handling has something coherent to work with.
+            return ParsedContent(
+                text=(
+                    "Docling PDF processing timed out after "
+                    f"{self.timeout_seconds} seconds. "
+                    f"File may be corrupt or extremely complex: "
+                    f"{metadata.get('name', 'unknown')}"
+                ),
+                metadata={
+                    **metadata,
+                    "parser": "docling_timeout",
+                    "error": str(e),
+                    "processing_time": self.timeout_seconds,
+                },
+            )
+        except Exception as e:
+            self.logger.error("DoclingParser PDF parsing failed: %s", e)
+            # Align with PDFPlumberParser behavior: return a basic fallback
+            # text + error metadata instead of raising.
+            fallback_text = (
+                f"Docling extraction failed: {str(e)}\n\n"
+                f"File: {metadata.get('name', 'unknown')}\n"
+                "This may indicate a corrupted or extremely complex PDF."
+            )
+            return ParsedContent(
+                text=fallback_text,
+                metadata={
+                    **metadata,
+                    "parser": "docling_fallback",
+                    "error": str(e),
+                },
+            )
         finally:
             # Clean up temp file if we created one.
             if tmp_path is not None:
@@ -707,12 +456,90 @@ class DoclingParser:
         This mirrors the proven pattern from the Contract IQ Docling integration,
         but returns an internal ``_NormalizedTable`` that we later map to the
         pipeline's table schema and to the unified table formatter.
+        
+        Docling stores tables in two places:
+        1. Top-level 'tables' array (preferred, structured format)
+        2. Nested in 'body'/'children' (legacy format)
         """
 
         tables: List[_NormalizedTable] = []
         if not lossless_json:
             return tables
 
+        # First, check top-level 'tables' array (Docling's preferred format)
+        if 'tables' in lossless_json and isinstance(lossless_json['tables'], list):
+            for table_idx, table_node in enumerate(lossless_json['tables']):
+                if not isinstance(table_node, dict):
+                    continue
+                
+                # Extract page number
+                page_no = (
+                    table_node.get("page")
+                    or table_node.get("page_number")
+                    or table_node.get("pageIndex")
+                    or 1
+                )
+                
+                # Extract table data - Docling uses 'data' key with 'table_cells' or 'grid'
+                table_data = table_node.get('data', {})
+                if isinstance(table_data, dict):
+                    # Prefer 'grid' format (already 2D, better structure)
+                    grid = table_data.get('grid')
+                    if isinstance(grid, list) and grid and len(grid) > 0:
+                        cell_rows = self._extract_cells_from_grid(grid)
+                        if cell_rows:
+                            # Post-process to merge multi-line descriptions
+                            # cell_rows = self._merge_multiline_descriptions(cell_rows)  # Disabled - keeping grid format only
+                            contains_currency = self._contains_currency(cell_rows)
+                            tables.append(
+                                _NormalizedTable(
+                                    page=int(page_no),
+                                    table_index=table_idx,
+                                    data=cell_rows,
+                                    row_count=len(cell_rows),
+                                    col_count=len(cell_rows[0]) if cell_rows else 0,
+                                    contains_currency=contains_currency,
+                                )
+                            )
+                            self.logger.debug(
+                                "DoclingParser: Extracted table %d from 'grid' format "
+                                "(page=%d, rows=%d, cols=%d)",
+                                table_idx + 1,
+                                page_no,
+                                len(cell_rows),
+                                len(cell_rows[0]) if cell_rows else 0,
+                            )
+                            continue
+                    
+                    # Fallback to 'table_cells' (list of cell objects with row/col indices)
+                    table_cells = table_data.get('table_cells')
+                    if isinstance(table_cells, list) and table_cells:
+                        cell_rows = self._extract_cells_from_table_cells(table_cells)
+                        if cell_rows:
+                            # Post-process to merge multi-line descriptions
+                            # cell_rows = self._merge_multiline_descriptions(cell_rows)  # Disabled - keeping grid format only
+                            contains_currency = self._contains_currency(cell_rows)
+                            tables.append(
+                                _NormalizedTable(
+                                    page=int(page_no),
+                                    table_index=table_idx,
+                                    data=cell_rows,
+                                    row_count=len(cell_rows),
+                                    col_count=len(cell_rows[0]) if cell_rows else 0,
+                                    contains_currency=contains_currency,
+                                )
+                            )
+                            self.logger.debug(
+                                "DoclingParser: Extracted table %d from 'table_cells' format "
+                                "(page=%d, rows=%d, cols=%d)",
+                                table_idx + 1,
+                                page_no,
+                                len(cell_rows),
+                                len(cell_rows[0]) if cell_rows else 0,
+                            )
+                            continue
+
+        # Fallback: walk the tree for nested tables (legacy format)
         def walk(node: Any, page_hint: Optional[int] = None) -> None:
             if isinstance(node, dict):
                 node_type = node.get("type") or node.get("kind")
@@ -824,6 +651,199 @@ class DoclingParser:
                 return " ".join([p for p in parts if p])
         return str(cell or "").strip()
 
+    def _extract_cells_from_grid(self, grid: List[List[Dict[str, Any]]]) -> List[List[str]]:
+        """
+        Extract 2D cell array from Docling's 'grid' format.
+        
+        Grid is a 2D array where each cell is a dict with 'text' key.
+        Grid format is preferred as it's already structured and handles merged cells.
+        """
+        if not grid or not isinstance(grid, list):
+            return []
+        
+        cell_rows = []
+        for row in grid:
+            if not isinstance(row, list):
+                continue
+            row_cells = []
+            for cell in row:
+                cell_text = self._cell_text(cell)
+                row_cells.append(cell_text)
+            if row_cells:  # Only add non-empty rows
+                cell_rows.append(row_cells)
+        
+        return cell_rows
+
+    def _merge_multiline_descriptions(self, cell_rows: List[List[str]]) -> List[List[str]]:
+        """
+        Merge multi-line descriptions that span multiple rows.
+        
+        Conservative heuristic: Only merge if:
+        1. Current row has ONLY one non-empty column (likely continuation)
+        2. Previous row has text in that same column (description column)
+        3. Previous row has MULTIPLE non-empty columns (not a section header)
+        4. Continuation text doesn't look like a section header (no ":" or "Total" keywords)
+        
+        This handles cases like:
+        Row 1: ["TA-BASE01-0001", "Kofax TotalAgility Base Configuration...", "1", ...]
+        Row 2: ["", "Transformation + 4 Full Users", "", "", ...]
+        ->
+        Row 1: ["TA-BASE01-0001", "Kofax TotalAgility Base Configuration... Transformation + 4 Full Users", "1", ...]
+        
+        But avoids merging legitimate single-column rows like:
+        - Section headers: ["", "Kofax TotalAgility", "", ...]
+        - Subtotals: ["", "", "", "License Sub-Total:", ...]
+        """
+        if not cell_rows or len(cell_rows) < 2:
+            return cell_rows
+        
+        # Keywords that suggest a row is NOT a continuation (section headers, totals, etc.)
+        section_keywords = ['total', 'subtotal', 'sub-total', 'summary', 'section', 'header']
+        
+        result_rows = []
+        i = 0
+        while i < len(cell_rows):
+            row = cell_rows[i][:]
+            
+            # Check if this is a continuation row (only one column with text)
+            non_empty_cols = [j for j, cell in enumerate(row) if cell and cell.strip()]
+            
+            # Conservative merge conditions
+            if len(non_empty_cols) == 1 and i > 0:
+                col_idx = non_empty_cols[0]
+                continuation_text = row[col_idx].strip()
+                
+                # Skip if continuation text looks like a section header
+                continuation_lower = continuation_text.lower()
+                if any(keyword in continuation_lower for keyword in section_keywords):
+                    # Likely a section header, don't merge
+                    pass
+                elif ':' in continuation_text and len(continuation_text) < 50:
+                    # Likely a label (e.g., "Sub-Total:"), don't merge
+                    pass
+                else:
+                    # Check if previous row has text in that same column AND has multiple columns
+                    prev_row = cell_rows[i - 1]
+                    prev_non_empty_cols = [j for j, cell in enumerate(prev_row) if cell and cell.strip()]
+                    
+                    if (col_idx < len(prev_row) and 
+                        prev_row[col_idx] and prev_row[col_idx].strip() and
+                        len(prev_non_empty_cols) > 1):  # Previous row must have multiple columns
+                        # Merge the continuation text into previous row in result_rows
+                        if len(result_rows) > 0:
+                            result_rows[-1][col_idx] = f"{result_rows[-1][col_idx]} {continuation_text}".strip()
+                        # Skip adding this row since we merged it
+                        i += 1
+                        continue
+            
+            # Only add non-empty rows
+            if any(cell and cell.strip() for cell in row):
+                result_rows.append(row)
+            
+            i += 1
+        
+        return result_rows
+
+    def _extract_cells_from_table_cells(
+        self, table_cells: List[Dict[str, Any]]
+    ) -> List[List[str]]:
+        """
+        Extract 2D cell array from Docling's 'table_cells' format.
+        
+        Table_cells is a flat list of cell objects with row/col indices:
+        - start_row_offset_idx, end_row_offset_idx
+        - start_col_offset_idx, end_col_offset_idx
+        - text, row_span, col_span
+        - row_section (for subtotals/sections)
+        
+        Improvements:
+        1. Properly handle merged cells using row_span/col_span
+        2. Merge multi-line descriptions that span rows
+        3. Better handling of merged columns
+        """
+        if not table_cells or not isinstance(table_cells, list):
+            return []
+        
+        # Find max row and col indices
+        max_row = 0
+        max_col = 0
+        for cell in table_cells:
+            if isinstance(cell, dict):
+                max_row = max(max_row, cell.get("end_row_offset_idx", 0))
+                max_col = max(max_col, cell.get("end_col_offset_idx", 0))
+        
+        if max_row == 0 or max_col == 0:
+            return []
+        
+        # Initialize 2D grid - store text directly, handle merged cells properly
+        grid = [[""] * max_col for _ in range(max_row)]
+        
+        # Process cells sorted by position to handle merged cells correctly
+        sorted_cells = sorted(
+            table_cells,
+            key=lambda c: (
+                c.get("start_row_offset_idx", 0),
+                c.get("start_col_offset_idx", 0),
+            ),
+        )
+        
+        for cell in sorted_cells:
+            if not isinstance(cell, dict):
+                continue
+            
+            row_start = cell.get("start_row_offset_idx", 0)
+            col_start = cell.get("start_col_offset_idx", 0)
+            col_span = cell.get("col_span", 1)
+            
+            cell_text = self._cell_text(cell)
+            
+            # Place text in origin cell (top-left of merged cell)
+            if row_start < max_row and col_start < max_col:
+                # Only fill if empty (to avoid overwriting)
+                if not grid[row_start][col_start]:
+                    grid[row_start][col_start] = cell_text
+                    # For merged columns, mark spanned columns as processed
+                    # (we'll handle display in the formatting step)
+                    for c in range(col_start + 1, min(col_start + col_span, max_col)):
+                        grid[row_start][c] = None  # Mark as merged continuation
+        
+        # Post-process: merge multi-line descriptions
+        # If a row has only one non-empty column and next row has same pattern in same column,
+        # merge them into a single row
+        result_rows = []
+        r = 0
+        while r < max_row:
+            row = grid[r][:]
+            # Replace None markers with empty strings
+            row = [cell if cell is not None else "" for cell in row]
+            
+            # Check if this is a continuation row (mostly empty, one column with text)
+            non_empty_cols = [i for i, cell in enumerate(row) if cell and cell.strip()]
+            
+            # Try to merge with next row if it's a continuation
+            if len(non_empty_cols) == 1 and r < max_row - 1:
+                col_idx = non_empty_cols[0]
+                next_row = grid[r + 1][:]
+                next_row = [cell if cell is not None else "" for cell in next_row]
+                next_non_empty_cols = [i for i, cell in enumerate(next_row) if cell and cell.strip()]
+                
+                # If next row is also a continuation in the same column, merge them
+                if len(next_non_empty_cols) == 1 and next_non_empty_cols[0] == col_idx:
+                    continuation_text = next_row[col_idx].strip()
+                    if continuation_text:
+                        # Merge the continuation text
+                        row[col_idx] = f"{row[col_idx]} {continuation_text}".strip()
+                        # Skip the next row since we merged it
+                        r += 1
+            
+            # Only add non-empty rows
+            if any(cell and cell.strip() for cell in row):
+                result_rows.append(row)
+            
+            r += 1
+        
+        return result_rows
+
     def _contains_currency(self, table_data: List[List[str]]) -> bool:
         """Heuristic: detect if a table appears to contain currency amounts."""
 
@@ -832,4 +852,5 @@ class DoclingParser:
         currency_markers = ["$", "€", "£", "¥", "USD", "EUR", "GBP"]
         joined = " ".join(" ".join(row) for row in table_data).upper()
         return any(marker in joined for marker in currency_markers)
+
 
