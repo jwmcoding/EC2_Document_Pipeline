@@ -71,6 +71,8 @@ docs/_build/
 # Data Files (should not be in git)
 *.json
 *.csv
+# Keep config CSVs that are required at runtime
+!src/redaction/SF-Cust-Mapping.csv
 *.db
 *.xlsx
 *.xls
