@@ -157,35 +157,31 @@ class SemanticChunker:
                         metadata: Dict[str, Any], start_chunk_index: int = 0) -> List[Chunk]:
         """Process a single business section into semantically coherent chunks"""
         
-        # Check if this is a table section (Excel, DOCX, or PDF table) and keep it whole
-        if self._is_table_section(section_content):
-            # Check if table size is within acceptable limits
-            word_count = len(section_content.split())
-            if word_count <= self.excel_sheet_max_size:
-                self.logger.info(f"Detected table section '{section_name}' ({word_count} words) - preserving as single chunk")
-                return [self._create_chunk(
-                    section_content.strip(), 
-                    section_name, 
-                    metadata, 
-                    start_chunk_index
-                )]
+        # First, segment content into text vs table blocks (handles mixed content)
+        segments = self._split_section_into_segments(section_content)
+        
+        all_chunks = []
+        current_chunk_index = start_chunk_index
+        
+        for segment_type, segment_content in segments:
+            if segment_type == "table":
+                # Process table block (unified format or normalized from markdown)
+                table_chunks = self._process_table_block(
+                    segment_content, section_name, metadata, current_chunk_index
+                )
+                all_chunks.extend(table_chunks)
+                current_chunk_index += len(table_chunks)
             else:
-                self.logger.warning(f"Table section '{section_name}' ({word_count} words) exceeds max size ({self.excel_sheet_max_size}) - using normal chunking")
-                # Fall through to normal chunking for very large tables
+                # Process normal text segment
+                sentences = self._split_into_sentences(segment_content)
+                if sentences:
+                    text_chunks = self._create_business_chunks(
+                        sentences, section_name, metadata, current_chunk_index
+                    )
+                    all_chunks.extend(text_chunks)
+                    current_chunk_index += len(text_chunks)
         
-        # Existing logic for other document types
-        # Split into sentences using business-aware rules
-        sentences = self._split_into_sentences(section_content)
-        
-        if not sentences:
-            return []
-        
-        # Group sentences into chunks based on size constraints and business logic
-        chunks = self._create_business_chunks(
-            sentences, section_name, metadata, start_chunk_index
-        )
-        
-        return chunks
+        return all_chunks
     
     def _split_into_sentences(self, text: str) -> List[str]:
         """Split text into sentences using business-aware rules"""
@@ -456,3 +452,370 @@ class SemanticChunker:
     
     # Backward compatibility alias
     _is_excel_sheet_section = _is_table_section
+    
+    def _split_section_into_segments(self, content: str) -> List[tuple]:
+        """
+        Split section content into alternating text and table segments.
+        
+        Returns:
+            List of (segment_type, segment_content) tuples where segment_type is "text" or "table"
+        """
+        segments = []
+        lines = content.split('\n')
+
+        # Guardrail: extremely large line counts (common with spreadsheet dumps) can
+        # make table detection expensive. In those cases, skip table detection and
+        # treat the section as plain text to ensure forward progress.
+        if len(lines) > 20000:
+            self.logger.warning(
+                "Segmenting guardrail: section has %d lines; skipping table detection",
+                len(lines),
+            )
+            return [("text", content)]
+        i = 0
+        
+        while i < len(lines):
+            # Check if we're at a unified table block start
+            if i < len(lines) and lines[i].strip().startswith('===') and lines[i].strip().endswith('==='):
+                # Found unified table block - extract it
+                table_lines, next_i = self._extract_unified_table_block(lines, i)
+                if table_lines:
+                    segments.append(("table", "\n".join(table_lines)))
+                    i = next_i
+                    continue
+            
+            # Check if we're at a markdown pipe table start
+            markdown_table_lines, next_i = self._find_markdown_table_at(lines, i)
+            if markdown_table_lines:
+                # Normalize markdown table to unified format
+                normalized = self._normalize_markdown_table(markdown_table_lines)
+                if normalized:
+                    segments.append(("table", normalized))
+                    i = next_i
+                    continue
+            
+            # Collect text lines until we hit a table or end
+            text_lines = []
+            while i < len(lines):
+                # Check if next line starts a table
+                if i < len(lines) and lines[i].strip().startswith('===') and lines[i].strip().endswith('==='):
+                    break
+                markdown_check, _ = self._find_markdown_table_at(lines, i)
+                if markdown_check:
+                    break
+                
+                text_lines.append(lines[i])
+                i += 1
+            
+            if text_lines:
+                text_content = "\n".join(text_lines).strip()
+                if text_content:
+                    segments.append(("text", text_content))
+        
+        return segments if segments else [("text", content)]
+    
+    def _extract_unified_table_block(self, lines: List[str], start_i: int) -> tuple:
+        """
+        Extract a unified table block starting at start_i.
+        
+        Returns:
+            (table_lines, next_index) where table_lines is the complete table block
+            and next_index is where to continue scanning
+        """
+        if start_i >= len(lines):
+            return ([], start_i)
+        
+        # Must start with === ... ===
+        if not (lines[start_i].strip().startswith('===') and lines[start_i].strip().endswith('===')):
+            return ([], start_i)
+        
+        table_lines = [lines[start_i]]
+        i = start_i + 1
+        
+        # Collect header row
+        if i < len(lines) and '|' in lines[i]:
+            table_lines.append(lines[i])
+            i += 1
+        
+        # Collect separator line
+        if i < len(lines) and lines[i].strip().startswith('-'):
+            table_lines.append(lines[i])
+            i += 1
+        
+        # Collect data rows (until we hit non-table content)
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            
+            # Stop if we hit another table block start
+            if stripped.startswith('===') and stripped.endswith('==='):
+                break
+            
+            # Stop if we hit a markdown table (different format)
+            if stripped.startswith('|') and i + 1 < len(lines):
+                next_stripped = lines[i + 1].strip()
+                if next_stripped.startswith('|') or (next_stripped.startswith('-') and '|' in next_stripped):
+                    # Could be markdown table - let that handler deal with it
+                    break
+            
+            # Continue if this looks like a table row
+            if '|' in line:
+                table_lines.append(line)
+                i += 1
+            elif not stripped:  # Empty line - might be part of table
+                table_lines.append(line)
+                i += 1
+            else:
+                # Non-table content - stop
+                break
+        
+        return (table_lines, i)
+    
+    def _find_markdown_table_at(self, lines: List[str], start_i: int) -> tuple:
+        """
+        Detect if a markdown pipe table starts at start_i.
+        
+        Returns:
+            (table_lines, next_index) if found, ([], start_i) otherwise
+        """
+        if start_i >= len(lines):
+            return ([], start_i)
+        
+        # Markdown table starts with a pipe-separated header row
+        header_line = lines[start_i].strip()
+        if not header_line.startswith('|') or header_line.count('|') < 2:
+            return ([], start_i)
+        
+        # Next line should be separator (|---|---| or similar)
+        if start_i + 1 >= len(lines):
+            return ([], start_i)
+        
+        separator_line = lines[start_i + 1].strip()
+        if not (separator_line.startswith('|') or separator_line.startswith('-')):
+            return ([], start_i)
+        
+        # IMPORTANT: avoid false positives on "Excel-like" table dumps that include a
+        # long dashed divider line but are not markdown pipe tables.
+        # A real markdown pipe table separator must include pipes.
+        if '|' not in separator_line:
+            return ([], start_i)
+        
+        # Collect header and separator
+        table_lines = [lines[start_i], lines[start_i + 1]]
+        i = start_i + 2
+        
+        # Collect data rows
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            
+            # Stop if we hit another table block start
+            if stripped.startswith('===') and stripped.endswith('==='):
+                break
+            
+            # Continue if this looks like a markdown table row
+            if stripped.startswith('|') and stripped.count('|') >= 2:
+                table_lines.append(line)
+                i += 1
+            elif not stripped:  # Empty line might separate tables
+                # Check if next non-empty line is a table row
+                j = i + 1
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                if j < len(lines) and lines[j].strip().startswith('|'):
+                    table_lines.append(line)  # Keep empty line
+                    i += 1
+                else:
+                    break
+            else:
+                # Non-table content - stop
+                break
+        
+        # Must have at least header + separator + 1 data row
+        if len(table_lines) >= 3:
+            return (table_lines, i)
+        
+        return ([], start_i)
+    
+    def _normalize_markdown_table(self, markdown_lines: List[str]) -> str:
+        """
+        Convert markdown pipe table to unified table block format.
+        
+        Args:
+            markdown_lines: Lines of markdown table (header, separator, data rows)
+            
+        Returns:
+            Unified table block string or empty string if conversion fails
+        """
+        if len(markdown_lines) < 3:
+            return ""
+        
+        # Parse header row
+        header_line = markdown_lines[0].strip()
+        header_cells = [cell.strip() for cell in header_line.strip('|').split('|')]
+        header_cells = [c for c in header_cells if c]  # Remove empty cells
+        
+        if not header_cells:
+            return ""
+        
+        # Generate table name (use first few header cells)
+        table_name = "_".join(header_cells[:2])[:30] if len(header_cells) >= 2 else "TABLE"
+        table_name = re.sub(r'[^\w\s-]', '', table_name).strip().replace(' ', '_')[:30]
+        if not table_name:
+            table_name = "TABLE"
+        
+        # Build unified format
+        parts = []
+        parts.append(f"=== {table_name} ===")
+        parts.append(" | ".join(header_cells))
+        
+        # Add separator
+        separator_length = max(len(" | ".join(header_cells)), 10)
+        parts.append("-" * separator_length)
+        
+        # Add data rows
+        for line in markdown_lines[2:]:
+            stripped = line.strip()
+            if not stripped.startswith('|'):
+                continue
+            
+            cells = [cell.strip() for cell in stripped.strip('|').split('|')]
+            cells = [c for c in cells if c]  # Remove empty cells
+            
+            if cells:
+                # Pad to match header width if needed
+                while len(cells) < len(header_cells):
+                    cells.append("")
+                parts.append(" | ".join(cells[:len(header_cells)]))
+        
+        return "\n".join(parts)
+    
+    def _process_table_block(self, table_content: str, section_name: str,
+                            metadata: Dict[str, Any], start_chunk_index: int) -> List[Chunk]:
+        """
+        Process a unified table block: preserve if small, split with header repetition if large.
+        
+        Args:
+            table_content: Unified table block content
+            section_name: Section name for metadata
+            metadata: Chunk metadata
+            start_chunk_index: Starting chunk index
+            
+        Returns:
+            List of Chunk objects
+        """
+        # Ensure it's a unified table block
+        if not self._is_table_section(table_content):
+            # Try normalizing if it looks like markdown
+            lines = table_content.split('\n')
+            markdown_table, _ = self._find_markdown_table_at(lines, 0)
+            if markdown_table:
+                table_content = self._normalize_markdown_table(markdown_table)
+                if not table_content:
+                    # Fallback: treat as text
+                    return []
+            else:
+                return []
+        
+        word_count = len(table_content.split())
+        
+        # Small table: preserve as single chunk
+        if word_count <= self.excel_sheet_max_size:
+            self.logger.info(f"Table block ({word_count} words) - preserving as single chunk")
+            return [self._create_chunk(
+                table_content.strip(),
+                section_name,
+                metadata,
+                start_chunk_index
+            )]
+        
+        # Large table: split with header repetition
+        self.logger.info(f"Table block ({word_count} words) exceeds max size ({self.excel_sheet_max_size}) - splitting with header repetition")
+        return self._split_large_table_block(table_content, section_name, metadata, start_chunk_index)
+    
+    def _split_large_table_block(self, table_content: str, section_name: str,
+                                metadata: Dict[str, Any], start_chunk_index: int) -> List[Chunk]:
+        """
+        Split a large unified table block into multiple chunks with repeated headers.
+        
+        Each chunk will have:
+        - === TABLE_NAME (part i/N) ===
+        - Header row
+        - Separator line
+        - Subset of data rows
+        
+        Returns:
+            List of Chunk objects
+        """
+        lines = table_content.split('\n')
+        if len(lines) < 4:
+            # Too small to split meaningfully
+            return [self._create_chunk(table_content.strip(), section_name, metadata, start_chunk_index)]
+        
+        # Extract table name from first line
+        first_line = lines[0].strip()
+        if first_line.startswith('===') and first_line.endswith('==='):
+            table_name = first_line.strip('= ').strip()
+        else:
+            table_name = "TABLE"
+        
+        # Extract header row and separator
+        header_row = lines[1] if len(lines) > 1 and '|' in lines[1] else ""
+        separator_line = lines[2] if len(lines) > 2 and lines[2].strip().startswith('-') else "-" * 50
+        
+        if not header_row:
+            # Fallback: can't split without header
+            return [self._create_chunk(table_content.strip(), section_name, metadata, start_chunk_index)]
+        
+        # Extract data rows (skip header and separator)
+        data_rows = []
+        for line in lines[3:]:
+            if line.strip() and '|' in line:
+                data_rows.append(line)
+        
+        if not data_rows:
+            return [self._create_chunk(table_content.strip(), section_name, metadata, start_chunk_index)]
+        
+        # Calculate rows per chunk to stay under word limit
+        # Estimate: header + separator + N rows should be <= excel_sheet_max_size words
+        header_words = len(header_row.split())
+        separator_words = len(separator_line.split())
+        avg_row_words = sum(len(row.split()) for row in data_rows[:10]) / min(10, len(data_rows)) if data_rows else 5
+        
+        # Reserve words for header + separator + part marker
+        reserved_words = header_words + separator_words + 10  # +10 for part marker
+        available_words = self.excel_sheet_max_size - reserved_words
+        
+        if available_words <= 0:
+            # Even header alone is too large - return as-is
+            return [self._create_chunk(table_content.strip(), section_name, metadata, start_chunk_index)]
+        
+        rows_per_chunk = max(1, int(available_words / avg_row_words)) if avg_row_words > 0 else 10
+        
+        # Split into chunks
+        chunks = []
+        total_chunks = (len(data_rows) + rows_per_chunk - 1) // rows_per_chunk
+        
+        for chunk_idx in range(total_chunks):
+            start_row = chunk_idx * rows_per_chunk
+            end_row = min(start_row + rows_per_chunk, len(data_rows))
+            chunk_rows = data_rows[start_row:end_row]
+            
+            # Build chunk content with part marker
+            chunk_lines = [
+                f"=== {table_name} (part {chunk_idx + 1}/{total_chunks}) ===",
+                header_row,
+                separator_line
+            ]
+            chunk_lines.extend(chunk_rows)
+            
+            chunk_text = "\n".join(chunk_lines)
+            chunks.append(self._create_chunk(
+                chunk_text,
+                section_name,
+                metadata,
+                start_chunk_index + chunk_idx
+            ))
+        
+        self.logger.info(f"Split table '{table_name}' into {len(chunks)} chunks with repeated headers")
+        return chunks
