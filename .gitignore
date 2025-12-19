@@ -87,3 +87,7 @@ custom_threads.db
 *.lock
 *.pid
 *.ics
+
+# Archive should never re-introduce large binary test documents into git history
+archive/**/original_files/*.pdf
+archive/**/original_files/*.PDF

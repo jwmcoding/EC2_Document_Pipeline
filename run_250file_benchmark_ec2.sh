@@ -12,8 +12,8 @@ SSH_KEY="$HOME/Downloads/docking.pem"
 EC2_USER="ec2-user"
 EC2_APP_DIR="/home/ec2-user/app"
 EC2_DATA_DIR="/data/august-2024"
-NAMESPACE="benchmark-250docs-2025-12-11"
-DISCOVERY_FILE="benchmark_250docs_discovery_2025_12_11.json"
+NAMESPACE="benchmark-250docs-docling-auto-ocr-2025-12-12"
+DISCOVERY_FILE="benchmark_250docs_discovery_2025_12_12.json"
 MAX_DOCS=250
 
 echo "🚀 250-File Benchmark Test on EC2"

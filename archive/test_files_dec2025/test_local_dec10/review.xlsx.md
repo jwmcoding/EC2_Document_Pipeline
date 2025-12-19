@@ -1,0 +1,15 @@
+# LOCAL Extraction: review.xlsx
+
+**Processing Time**: 0.01s
+**File Size**: 9.9 KB
+**Parser**: pdfplumber_excel
+**Platform**: Local Mac (MPS)
+
+---
+
+## Extracted Content
+
+PDFPlumber extraction failed: No /Root object! - Is this really a PDF?
+
+File: unknown
+This may indicate a corrupted or complex PDF.
