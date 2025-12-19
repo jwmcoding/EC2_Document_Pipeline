@@ -1,0 +1,87 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables
+.env
+.env.local
+.env.production
+.env.test
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project Specific
+logs/
+cache/
+test_cache/
+output/
+demo_logs/
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+
+# Documentation builds
+docs/_build/
+
+# Data Files (should not be in git)
+*.json
+*.csv
+*.db
+*.xlsx
+*.xls
+salesforce_*
+organized_files_*
+enhanced_salesforce_*
+metadata_enhancement_*
+discovery_*.json
+*_discovery.json
+*_mapping.csv
+custom_threads.db
+*.lock
+*.pid
+*.ics
