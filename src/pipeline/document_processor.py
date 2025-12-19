@@ -74,7 +74,9 @@ except ImportError:
     def is_mistral_available() -> bool:  # type: ignore[no-redef]
         return False
 from chunking.semantic_chunker import SemanticChunker, Chunk
-from utils.discovery_cache import DiscoveryCache
+# DiscoveryCache was archived in Dec 2025 - discovery now uses DiscoveryPersistence
+# Setting DiscoveryCache to None disables the old caching system
+DiscoveryCache = None
 try:
     from pipeline.processing_batch_manager import ProcessingBatchManager
 except ImportError:
@@ -103,7 +105,8 @@ class DocumentProcessor:
                  enable_vision_analysis: bool = False,
                  vision_model: str = "gpt-4o",
                  parser_backend: str = "pdfplumber",
-                 docling_kwargs: Optional[Dict[str, Any]] = None):
+                 docling_kwargs: Optional[Dict[str, Any]] = None,
+                 redaction_service: Optional[Any] = None):
         """Initialize document processor with optional discovery caching and batch processing
         
         Args:
@@ -120,6 +123,7 @@ class DocumentProcessor:
         self.batch_mode = batch_mode          # v3: Batch collection mode
         self.batch_submit_threshold = batch_submit_threshold  # auto-submit threshold (requests)
         self.parser_backend = parser_backend.lower().strip() if parser_backend else "pdfplumber"
+        self.redaction_service = redaction_service  # PII redaction service
 
         base_logger = logging.getLogger(__name__)
 
@@ -161,13 +165,17 @@ class DocumentProcessor:
                 try:
                     # Use custom kwargs if provided, otherwise use defaults
                     docling_init_kwargs = docling_kwargs or {}
-                    if "ocr_mode" not in docling_init_kwargs:
-                        docling_init_kwargs["ocr_mode"] = "auto"
+                    # Convert ocr_mode to ocr boolean for old API
+                    if "ocr_mode" in docling_init_kwargs:
+                        ocr_mode_val = docling_init_kwargs.pop("ocr_mode")
+                        docling_init_kwargs["ocr"] = ocr_mode_val.lower() in ("on", "auto")
+                    elif "ocr" not in docling_init_kwargs:
+                        docling_init_kwargs["ocr"] = True  # Default to OCR enabled
                     if "timeout_seconds" not in docling_init_kwargs:
                         docling_init_kwargs["timeout_seconds"] = 240
                     self.parser = DoclingParser(**docling_init_kwargs)
-                    ocr_mode_str = docling_init_kwargs.get("ocr_mode", "auto")
-                    base_logger.info(f"DocumentProcessor initialized with Docling parser backend (OCR mode: {ocr_mode_str})")
+                    ocr_enabled = docling_init_kwargs.get("ocr", True)
+                    base_logger.info(f"DocumentProcessor initialized with Docling parser backend (OCR: {ocr_enabled})")
                 except Exception as e:
                     base_logger.warning(
                         "Failed to initialize Docling parser (%s). Falling back to PDFPlumber.",
@@ -206,16 +214,18 @@ class DocumentProcessor:
         }
     
     def _init_discovery_cache(self, folder_path: str) -> None:
-        """Initialize discovery cache for the given folder"""
-        if not self.enable_discovery_cache:
+        """Initialize discovery cache for the given folder
+        
+        Note: DiscoveryCache was deprecated in Dec 2025. This method is kept for 
+        backwards compatibility but does nothing when DiscoveryCache is None.
+        Discovery now uses DiscoveryPersistence instead.
+        """
+        if not self.enable_discovery_cache or DiscoveryCache is None:
             return
         
-        # Create unique cache name based on folder
-        cache_name = self.discovery_cache.get_folder_hash(folder_path) if hasattr(self, 'discovery_cache') and self.discovery_cache else None
-        if not cache_name:
-            cache_hash = folder_path.replace('/', '_').replace(' ', '_').lower()
-            cache_name = f"folder_{cache_hash}"
-        
+        # Legacy cache initialization (disabled when DiscoveryCache is None)
+        cache_hash = folder_path.replace('/', '_').replace(' ', '_').lower()
+        cache_name = f"folder_{cache_hash}"
         self.discovery_cache = DiscoveryCache(cache_name)
         self.logger.info(f"📁 Discovery cache ready: {cache_name}")
 
@@ -497,6 +507,47 @@ class DocumentProcessor:
             else:
                 self.logger.debug(f"Enhanced LLM classification not available for {doc_metadata.name}")
             
+            # Step 4.5: PII Redaction (before chunking)
+            text_to_chunk = parsed_content.text
+            if self.redaction_service:
+                try:
+                    from src.redaction.redaction_context import RedactionContext
+                    
+                    self.logger.debug(f"Applying PII redaction: {doc_metadata.path}")
+                    redaction_context = RedactionContext(
+                        salesforce_client_id=doc_metadata.salesforce_client_id,
+                        client_name=doc_metadata.client_name,
+                        industry_label=None,  # Will be looked up from registry
+                        vendor_name=doc_metadata.vendor_name,
+                        file_type=doc_metadata.file_type,
+                        document_type=doc_metadata.document_type
+                    )
+                    
+                    redaction_result = self.redaction_service.redact(text_to_chunk, redaction_context)
+                    
+                    if redaction_result.has_errors() or redaction_result.has_validation_failures():
+                        error_msg = f"Redaction failed: {redaction_result.errors + redaction_result.validation_failures}"
+                        result["errors"].append(error_msg)
+                        self.logger.error(f"❌ {error_msg}")
+                        self.stats["documents_failed"] += 1
+                        return result
+                    
+                    text_to_chunk = redaction_result.redacted_text
+                    self.logger.debug(
+                        f"Redaction complete: {redaction_result.total_replacements()} replacements "
+                        f"(client={redaction_result.client_replacements}, "
+                        f"email={redaction_result.email_replacements}, "
+                        f"phone={redaction_result.phone_replacements}, "
+                        f"address={redaction_result.address_replacements}, "
+                        f"person={redaction_result.person_replacements})"
+                    )
+                except Exception as e:
+                    error_msg = f"Redaction error: {str(e)}"
+                    result["errors"].append(error_msg)
+                    self.logger.error(f"❌ {error_msg}")
+                    self.stats["documents_failed"] += 1
+                    return result
+            
             # Step 5: Create semantic chunks
             self.logger.debug(f"Creating chunks: {doc_metadata.path}")
             
@@ -508,16 +559,16 @@ class DocumentProcessor:
             }
             
             chunks = self.chunker.chunk_document(
-                parsed_content.text, 
+                text_to_chunk, 
                 essential_chunking_metadata
             )
             
             # Direct fallback: for short docs or no chunks, create a single bounded full-text chunk
-            text_len = len(parsed_content.text or "")
+            text_len = len(text_to_chunk or "")
             if (not chunks) or (text_len <= 1500):
-                if parsed_content.text:
+                if text_to_chunk:
                     self.logger.warning("Using single bounded full-text chunk (short or unchunkable doc)")
-                    bounded_text = parsed_content.text[: max(500, min(4000, text_len)) ]
+                    bounded_text = text_to_chunk[: max(500, min(4000, text_len)) ]
                     single_chunk = Chunk(
                         text=bounded_text,
                         metadata={
@@ -621,7 +672,6 @@ class DocumentProcessor:
                 for key in [
                     "docling_ocr_mode",
                     "docling_ocr_used",
-                    "docling_pass_used",
                     "docling_text_chars",
                     "docling_word_count",
                     "docling_alnum_ratio",

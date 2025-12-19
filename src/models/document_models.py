@@ -101,8 +101,8 @@ class DocumentMetadata:
     content_source: Optional[str] = None  # "document_file", "deal_narrative", "customer_comments"
     
     # Deal Classification Fields (added December 2025)
+    # Note: description removed Dec 14 - long text not suitable for Pinecone filtering
     report_type: Optional[str] = None  # From Report_Type__c (19% populated)
-    description: Optional[str] = None  # From Description__c (86.9% populated)
     project_type: Optional[str] = None  # From Project_Type__c (1.7% populated)
     competition: Optional[str] = None  # From Competition__c (24.2% populated)
     npi_analyst: Optional[str] = None  # From NPI_Analyst__c (91.4% populated)

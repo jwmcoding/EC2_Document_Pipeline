@@ -45,6 +45,14 @@ from src.pipeline.processing_batch_manager import ProcessingBatchManager
 from src.config.progress_logger import ProcessingProgressLogger
 from src.chunking.chunker_factory import ChunkerFactory
 
+# Processing defaults
+DEFAULT_BATCH_SIZE: int = 50
+DEFAULT_NAMESPACE: str = "documents"
+DEFAULT_REDACTION_MODEL: str = "gpt-5-mini-2025-08-07"
+EXCLUDED_FILE_TYPES_DEFAULT: str = ".png"
+
+__all__ = ["DiscoveredDocumentProcessor", "create_argument_parser", "main"]
+
 class DiscoveredDocumentProcessor:
     """Processes documents from discovery JSON files"""
     
@@ -65,8 +73,12 @@ class DiscoveredDocumentProcessor:
             "total_processing_time": 0.0
         }
 
-    def run(self, args: argparse.Namespace):
-        """Run document processing based on arguments"""
+    def run(self, args: argparse.Namespace) -> None:
+        """Run document processing based on arguments.
+        
+        Args:
+            args: Parsed command line arguments.
+        """
         # Validate input file
         if not Path(args.input).exists():
             self.logger.error(f"❌ Discovery file not found: {args.input}")
@@ -103,15 +115,30 @@ class DiscoveredDocumentProcessor:
         else:
             self._process_documents(documents_to_process, args)
     
-    def _display_discovery_summary(self, summary: Dict[str, Any]):
-        """Display discovery summary information"""
+    def _display_discovery_summary(self, summary: Dict[str, Any]) -> None:
+        """Display discovery summary information.
+        
+        Args:
+            summary: Discovery summary dictionary.
+        """
         self.logger.info(f"\n📊 Discovery Summary:")
         self.logger.info(f"📂 Source: {summary['source_type']} ({summary['source_path']})")
         self.logger.info(f"📄 Total documents: {summary['total_documents']}")
         self.logger.info(f"🏷️ LLM classification: {'Enabled' if summary['llm_classification_enabled'] else 'Disabled'}")
     
-    def _initialize_clients(self, summary: Dict[str, Any], args: argparse.Namespace):
-        """Initialize source and processing clients"""
+    def _initialize_clients(self, summary: Dict[str, Any], args: argparse.Namespace) -> None:
+        """Initialize source and processing clients.
+        
+        Sets up the appropriate source client (Dropbox, local filesystem, or Salesforce)
+        and the document processor with configured parsers and chunkers.
+        
+        Args:
+            summary: Discovery summary dictionary containing source type and path.
+            args: Parsed command line arguments.
+            
+        Raises:
+            ValueError: If required configuration is missing for Salesforce source.
+        """
         source_type = summary['source_type']
         source_path = summary['source_path']
         
@@ -249,6 +276,30 @@ class DiscoveredDocumentProcessor:
                 "alnum_threshold": args.docling_alnum_threshold,
             }
         
+        # Initialize redaction service if enabled
+        redaction_service = None
+        if args.enable_redaction and args.client_redaction_csv:
+            try:
+                from src.redaction.client_registry import ClientRegistry
+                from src.redaction.llm_span_detector import LLMSpanDetector
+                from src.redaction.redaction_service import RedactionService
+                
+                client_registry = ClientRegistry(args.client_redaction_csv)
+                llm_detector = LLMSpanDetector(
+                    api_key=self.settings.OPENAI_API_KEY,
+                    model=args.redaction_model or DEFAULT_REDACTION_MODEL
+                )
+                redaction_service = RedactionService(
+                    client_registry=client_registry,
+                    llm_span_detector=llm_detector,
+                    strict_mode=True
+                )
+                self.logger.info("✅ Redaction service initialized")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to initialize redaction service: {e}")
+                if args.enable_redaction:
+                    raise  # Fail if redaction was explicitly requested
+        
         self.document_processor = DocumentProcessor(
             dropbox_client=self.source_client,
             pinecone_client=self.pinecone_client,
@@ -257,7 +308,8 @@ class DiscoveredDocumentProcessor:
             batch_mode=batch_mode,
             enable_discovery_cache=False,
             parser_backend=args.parser_backend,
-            docling_kwargs=docling_kwargs if docling_kwargs else None
+            docling_kwargs=docling_kwargs if docling_kwargs else None,
+            redaction_service=redaction_service
         )
         
         # Initialize and set the chunker using the factory
@@ -276,7 +328,7 @@ class DiscoveredDocumentProcessor:
         if args.filter_file_type:
             include_file_types = {x.strip() for x in args.filter_file_type.split(",") if x.strip()}
 
-        exclude_file_types: Set[str] = {".png"}
+        exclude_file_types: Set[str] = {EXCLUDED_FILE_TYPES_DEFAULT}
         if args.exclude_file_type:
             exclude_file_types = {x.strip() for x in args.exclude_file_type.split(",") if x.strip()}
 
@@ -289,6 +341,8 @@ class DiscoveredDocumentProcessor:
             exclude_file_types=exclude_file_types or None,
             modified_after=args.modified_after,
             modified_before=args.modified_before,
+            deal_created_after=args.deal_created_after,
+            deal_created_before=args.deal_created_before,
             min_size_kb=args.min_size_kb,
             max_size_mb=args.max_size_mb,
         )
@@ -338,14 +392,26 @@ class DiscoveredDocumentProcessor:
             f"excluded_date_invalid={stats.get('excluded_modified_time_missing_or_invalid')} "
             f"excluded_after={stats.get('excluded_modified_after')} "
             f"excluded_before={stats.get('excluded_modified_before')} "
+            f"excluded_deal_date_missing={stats.get('excluded_deal_date_missing')} "
+            f"excluded_deal_after={stats.get('excluded_deal_created_after')} "
+            f"excluded_deal_before={stats.get('excluded_deal_created_before')} "
             f"excluded_min_size={stats.get('excluded_min_size')} "
             f"excluded_max_size={stats.get('excluded_max_size')}"
         )
 
         return filtered_docs
     
-    def _process_documents(self, documents: List[Dict[str, Any]], args: argparse.Namespace):
-        """Process the selected documents"""
+    def _process_documents(self, documents: List[Dict[str, Any]], args: argparse.Namespace) -> None:
+        """Process the selected documents.
+        
+        Converts discovery data to DocumentMetadata, processes each document
+        through the pipeline (parse, chunk, embed, upsert), and updates
+        processing status in the discovery JSON.
+        
+        Args:
+            documents: List of document dictionaries from discovery JSON.
+            args: Parsed command line arguments.
+        """
         start_time = datetime.now()
         total_docs = len(documents)
         
@@ -382,10 +448,33 @@ class DiscoveredDocumentProcessor:
                 )
                 
                 # Update processing status
+                # Determine content_parser based on file type
+                file_type = doc_data.get("file_info", {}).get("file_type", "").lower()
+                if file_type == ".pdf":
+                    content_parser = args.parser_backend  # mistral, docling, or pdfplumber
+                elif file_type in [".xlsx", ".xls", ".csv"]:
+                    content_parser = "pandas_openpyxl"
+                elif file_type == ".docx":
+                    content_parser = "python_docx"
+                elif file_type == ".doc":
+                    content_parser = "docx2txt"  # Primary method
+                elif file_type == ".msg":
+                    content_parser = "extract_msg"
+                elif file_type == ".pptx":
+                    content_parser = "python_pptx"
+                elif file_type in [".png", ".jpg", ".jpeg"]:
+                    content_parser = f"image_to_pdf_{args.parser_backend}"
+                elif file_type == ".txt":
+                    content_parser = "direct_text"
+                else:
+                    content_parser = "unknown"
+                
                 processing_status = {
                     "processed": result["success"],
                     "processing_date": datetime.now().isoformat(),
                     "processor_version": "2.0",
+                    "parser_backend": args.parser_backend,  # PDF parser selection
+                    "content_parser": content_parser,  # Actual parser used for this file type
                     "chunks_created": result.get("chunks_created", 0),
                     "vectors_created": result.get("chunks_created", 0),  # Same as chunks
                     "pinecone_namespace": args.namespace,
@@ -443,7 +532,7 @@ class DiscoveredDocumentProcessor:
             self.persistence.flush_buffer()
             raise
     
-    def _collect_batch_requests_only(self, documents: List[Dict[str, Any]], args: argparse.Namespace):
+    def _collect_batch_requests_only(self, documents: List[Dict[str, Any]], args: argparse.Namespace) -> None:
         """Collect LLM requests for batch processing without processing documents"""
         start_time = datetime.now()
         total_docs = len(documents)
@@ -519,7 +608,7 @@ class DiscoveredDocumentProcessor:
             self.logger.error(f"❌ Collection error: {e}")
             raise
 
-    def _handle_batch_submission(self, args: argparse.Namespace):
+    def _handle_batch_submission(self, args: argparse.Namespace) -> None:
         """Handle batch job submission and provide user feedback"""
         batch_info = self.document_processor.get_batch_requests_info()
         
@@ -556,7 +645,7 @@ class DiscoveredDocumentProcessor:
                 
                 self.logger.info(f"\n📊 Next Steps:")
                 self.logger.info(f"   1. Monitor job: python batch_results_checker.py --job-id {batch_job_id}")
-                self.logger.info(f"   2. Check status: python -c \"from src.pipeline.processing_batch_manager import ProcessingBatchManager; print(ProcessingBatchManager('{self.settings.OPENAI_API_KEY}').check_batch_status('{batch_job_id}'))\"")
+                self.logger.info(f"   2. Check status: python -c \"from src.pipeline.processing_batch_manager import ProcessingBatchManager; import os; print(ProcessingBatchManager(os.getenv('OPENAI_API_KEY')).check_batch_status('{batch_job_id}'))\"")
                 if not args.batch_only:
                     self.logger.info(f"   3. Update processed documents: python batch_processing_updater.py --job-id {batch_job_id} --discovery-file {args.input}")
                 
@@ -612,106 +701,147 @@ class DiscoveredDocumentProcessor:
             else:
                 print("Please enter 'y' for yes or 'n' for no.")
 
-    def _convert_to_document_metadata(self, doc_data: Dict[str, Any]) -> Optional[DocumentMetadata]:
-        """Convert discovery JSON data back to DocumentMetadata object"""
-        try:
-            # Extract data from discovery format
+    def _extract_file_info(self, doc_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract file information from discovery data.
+        
+        Args:
+            doc_data: Document data dictionary from discovery JSON.
+            
+        Returns:
+            Dictionary with file-related fields for DocumentMetadata.
+        """
             file_info = doc_data.get("file_info", {})
-            business_meta = doc_data.get("business_metadata", {})
-            llm_classification = doc_data.get("llm_classification", {})
             source_meta = doc_data.get("source_metadata", {})
             
-            # Extract deal metadata from discovery JSON
+        return {
+            "path": file_info.get("path", ""),
+            "name": file_info.get("name", ""),
+            "size": file_info.get("size", 0),
+            "size_mb": file_info.get("size_mb", 0.0),
+            "file_type": file_info.get("file_type", ""),
+            "modified_time": file_info.get("modified_time", ""),
+            "full_path": source_meta.get("source_path", file_info.get("path", "")),
+            "dropbox_id": source_meta.get("source_id", ""),
+            "content_hash": file_info.get("content_hash"),
+            "is_downloadable": True,
+        }
+    
+    def _extract_business_metadata(self, doc_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract business metadata from discovery data.
+        
+        Args:
+            doc_data: Document data dictionary from discovery JSON.
+            
+        Returns:
+            Dictionary with business-related fields for DocumentMetadata.
+        """
+        business_meta = doc_data.get("business_metadata", {})
             deal_meta = doc_data.get("deal_metadata", {})
             
-# Create DocumentMetadata object with ALL fields
-            doc_metadata = DocumentMetadata(
-                # Basic file info
-                path=file_info.get("path", ""),
-                name=file_info.get("name", ""),
-                size=file_info.get("size", 0),
-                size_mb=file_info.get("size_mb", 0.0),
-                file_type=file_info.get("file_type", ""),
-                modified_time=file_info.get("modified_time", ""),
-                
-                # Business / deal timing metadata
-                # NOTE: DocumentMetadata does not have a 'year' field; the canonical
-                # temporal field is deal_creation_date, which may be present either
-                # in business_metadata or deal_metadata depending on the connector.
-                deal_creation_date=business_meta.get("deal_creation_date") or deal_meta.get("deal_creation_date"),
-                week_number=business_meta.get("week_number"),
-                week_date=business_meta.get("week_date"),
-                vendor=business_meta.get("vendor"),
-                client=business_meta.get("client"),
-                deal_number=business_meta.get("deal_number"),
-                deal_name=business_meta.get("deal_name"),
-                
-                # SALESFORCE DEAL METADATA (CRITICAL FIX)
-                deal_id=deal_meta.get("deal_id"),
-                salesforce_deal_id=deal_meta.get("salesforce_deal_id"),  # Raw Salesforce ID
-                deal_subject=deal_meta.get("deal_subject"),
-                deal_status=deal_meta.get("deal_status"),
-                deal_reason=deal_meta.get("deal_reason"),
-                deal_start_date=deal_meta.get("deal_start_date"),
-                negotiated_by=deal_meta.get("negotiated_by"),
-                
-                # Financial metrics
-                proposed_amount=deal_meta.get("proposed_amount"),
-                final_amount=deal_meta.get("final_amount"),
-                savings_1yr=deal_meta.get("savings_1yr"),
-                savings_3yr=deal_meta.get("savings_3yr"),
-                savings_target=deal_meta.get("savings_target"),
-                savings_percentage=deal_meta.get("savings_percentage"),
-                
-                # Client/Vendor information
-                client_id=deal_meta.get("client_id"),
-                client_name=deal_meta.get("client_name"),
-                salesforce_client_id=deal_meta.get("salesforce_client_id"),  # Raw Salesforce client ID
-                vendor_id=deal_meta.get("vendor_id"),
-                vendor_name=deal_meta.get("vendor_name"),
-                salesforce_vendor_id=deal_meta.get("salesforce_vendor_id"),  # Raw Salesforce vendor ID
-                
-                # Contract information
-                contract_term=deal_meta.get("contract_term"),
-                contract_start=deal_meta.get("contract_start"),
-                contract_end=deal_meta.get("contract_end"),
-                effort_level=deal_meta.get("effort_level"),
-                has_fmv_report=deal_meta.get("has_fmv_report"),
-                deal_origin=deal_meta.get("deal_origin"),
-                
-                # Salesforce-specific
-                salesforce_content_version_id=deal_meta.get("salesforce_content_version_id"),
-                
-                # Mapping status
-                mapping_status=deal_meta.get("mapping_status"),
-                mapping_method=deal_meta.get("mapping_method"),
-                mapping_reason=deal_meta.get("mapping_reason"),
-                
-                # File metadata  
-                full_path=source_meta.get("source_path", file_info.get("path", "")),
-                path_components=business_meta.get("path_components", []),
-                dropbox_id=source_meta.get("source_id", ""),
-                content_hash=file_info.get("content_hash"),
-                is_downloadable=True,
-                
-                # LLM classification
-                document_type=llm_classification.get("document_type"),
-                document_type_confidence=llm_classification.get("confidence", 0.0),
-                classification_reasoning=llm_classification.get("reasoning"),
-                classification_method=llm_classification.get("classification_method"),
-                alternative_document_types=llm_classification.get("alternative_types", []),
-                classification_tokens_used=llm_classification.get("tokens_used", 0),
-                
-                # Deal Classification Fields (NEW December 2025)
-                report_type=deal_meta.get("report_type"),
-                description=deal_meta.get("description"),
-                project_type=deal_meta.get("project_type"),
-                competition=deal_meta.get("competition"),
-                npi_analyst=deal_meta.get("npi_analyst"),
-                dual_multi_sourcing=deal_meta.get("dual_multi_sourcing"),
-                time_pressure=deal_meta.get("time_pressure"),
-                advisor_network_used=deal_meta.get("advisor_network_used")
-            )
+        return {
+            "deal_creation_date": business_meta.get("deal_creation_date") or deal_meta.get("deal_creation_date"),
+            "week_number": business_meta.get("week_number"),
+            "week_date": business_meta.get("week_date"),
+            "vendor": business_meta.get("vendor"),
+            "client": business_meta.get("client"),
+            "deal_number": business_meta.get("deal_number"),
+            "deal_name": business_meta.get("deal_name"),
+            "path_components": business_meta.get("path_components", []),
+        }
+    
+    def _extract_deal_metadata(self, doc_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract deal metadata from discovery data.
+        
+        Args:
+            doc_data: Document data dictionary from discovery JSON.
+            
+        Returns:
+            Dictionary with deal-related fields for DocumentMetadata.
+        """
+        deal_meta = doc_data.get("deal_metadata", {})
+        
+        return {
+            "deal_id": deal_meta.get("deal_id"),
+            "salesforce_deal_id": deal_meta.get("salesforce_deal_id"),
+            "deal_subject": deal_meta.get("deal_subject"),
+            "deal_status": deal_meta.get("deal_status"),
+            "deal_reason": deal_meta.get("deal_reason"),
+            "deal_start_date": deal_meta.get("deal_start_date"),
+            "negotiated_by": deal_meta.get("negotiated_by"),
+            "proposed_amount": deal_meta.get("proposed_amount"),
+            "final_amount": deal_meta.get("final_amount"),
+            "savings_1yr": deal_meta.get("savings_1yr"),
+            "savings_3yr": deal_meta.get("savings_3yr"),
+            "savings_target": deal_meta.get("savings_target"),
+            "savings_percentage": deal_meta.get("savings_percentage"),
+            "client_id": deal_meta.get("client_id"),
+            "client_name": deal_meta.get("client_name"),
+            "salesforce_client_id": deal_meta.get("salesforce_client_id"),
+            "vendor_id": deal_meta.get("vendor_id"),
+            "vendor_name": deal_meta.get("vendor_name"),
+            "salesforce_vendor_id": deal_meta.get("salesforce_vendor_id"),
+            "contract_term": deal_meta.get("contract_term"),
+            "contract_start": deal_meta.get("contract_start"),
+            "contract_end": deal_meta.get("contract_end"),
+            "effort_level": deal_meta.get("effort_level"),
+            "has_fmv_report": deal_meta.get("has_fmv_report"),
+            "deal_origin": deal_meta.get("deal_origin"),
+            "salesforce_content_version_id": deal_meta.get("salesforce_content_version_id"),
+            "mapping_status": deal_meta.get("mapping_status"),
+            "mapping_method": deal_meta.get("mapping_method"),
+            "mapping_reason": deal_meta.get("mapping_reason"),
+            "report_type": deal_meta.get("report_type"),
+            "project_type": deal_meta.get("project_type"),
+            "competition": deal_meta.get("competition"),
+            "npi_analyst": deal_meta.get("npi_analyst"),
+            "dual_multi_sourcing": deal_meta.get("dual_multi_sourcing"),
+            "time_pressure": deal_meta.get("time_pressure"),
+            "advisor_network_used": deal_meta.get("advisor_network_used"),
+        }
+    
+    def _extract_llm_classification(self, doc_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract LLM classification data from discovery data.
+        
+        Args:
+            doc_data: Document data dictionary from discovery JSON.
+            
+        Returns:
+            Dictionary with LLM classification fields for DocumentMetadata.
+        """
+        llm_classification = doc_data.get("llm_classification", {})
+        
+        return {
+            "document_type": llm_classification.get("document_type"),
+            "document_type_confidence": llm_classification.get("confidence", 0.0),
+            "classification_reasoning": llm_classification.get("reasoning"),
+            "classification_method": llm_classification.get("classification_method"),
+            "alternative_document_types": llm_classification.get("alternative_types", []),
+            "classification_tokens_used": llm_classification.get("tokens_used", 0),
+        }
+    
+    def _convert_to_document_metadata(self, doc_data: Dict[str, Any]) -> Optional[DocumentMetadata]:
+        """Convert discovery JSON data to DocumentMetadata object.
+        
+        Extracts file info, business metadata, deal metadata, and LLM classification
+        from the discovery JSON structure and constructs a DocumentMetadata instance.
+        
+        Args:
+            doc_data: Document data dictionary from discovery JSON.
+            
+        Returns:
+            DocumentMetadata object or None if conversion fails.
+            
+        Note:
+            Errors are logged and None is returned rather than raising exceptions.
+        """
+        try:
+            file_info_dict = self._extract_file_info(doc_data)
+            business_meta_dict = self._extract_business_metadata(doc_data)
+            deal_meta_dict = self._extract_deal_metadata(doc_data)
+            llm_class_dict = self._extract_llm_classification(doc_data)
+            
+            # Combine all dictionaries and create DocumentMetadata
+            doc_metadata = DocumentMetadata(**file_info_dict, **business_meta_dict, **deal_meta_dict, **llm_class_dict)
             
             return doc_metadata
             
@@ -719,8 +849,12 @@ class DiscoveredDocumentProcessor:
             self.logger.error(f"❌ Error converting document data: {e}")
             return None
     
-    def _display_final_summary(self, elapsed):
-        """Display final processing summary"""
+    def _display_final_summary(self, elapsed) -> None:
+        """Display final processing summary.
+        
+        Args:
+            elapsed: Total elapsed time for processing.
+        """
         self.logger.success(f"\n🎉 Processing Complete!")
         self.logger.info(f"📊 Documents processed: {self.stats['documents_processed']}")
         self.logger.info(f"❌ Documents failed: {self.stats['documents_failed']}")
@@ -735,8 +869,12 @@ class DiscoveredDocumentProcessor:
             self.logger.info(f"📈 Average: {avg_time:.2f}s per document, {avg_chunks:.1f} chunks per document")
 
 
-def create_argument_parser():
-    """Create command line argument parser"""
+def create_argument_parser() -> argparse.ArgumentParser:
+    """Create command line argument parser.
+    
+    Returns:
+        Configured ArgumentParser instance with all processing options.
+    """
     parser = argparse.ArgumentParser(
         description="Process documents from discovery JSON files",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -767,18 +905,21 @@ Examples:
                        help="Discovery JSON file to process")
     
     # Processing options
-    parser.add_argument("--namespace", type=str, default="documents",
-                       help="Pinecone namespace for storage (default: documents)")
-    parser.add_argument("--batch-size", type=int, default=50,
-                       help="Processing batch size for progress updates (default: 50)")
+    parser.add_argument("--namespace", type=str, default=DEFAULT_NAMESPACE,
+                       help=f"Pinecone namespace for storage (default: {DEFAULT_NAMESPACE})")
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE,
+                       help=f"Processing batch size for progress updates (default: {DEFAULT_BATCH_SIZE})")
     parser.add_argument("--reprocess", action="store_true",
                        help="Reprocess already processed documents")
     parser.add_argument("--resume", action="store_true",
                        help="Resume from last processed document")
     
     # Batch processing options (v3)
-    parser.add_argument("--use-batch", action="store_true",
-                       help="Use batch API for LLM classification (50% cost savings)")
+    parser.add_argument(
+        "--use-batch",
+        action="store_true",
+        help="Use batch API for LLM classification (50%% cost savings)",
+    )
     parser.add_argument("--batch-only", action="store_true",
                        help="Only collect LLM requests without processing documents")
     parser.add_argument("--interactive", action="store_true",
@@ -789,8 +930,8 @@ Examples:
                        help="Filter by document types (comma-separated). NOTE: only works if discovery JSON already contains llm_classification.document_type.")
     parser.add_argument("--filter-file-type", type=str,
                        help="Filter by file types (comma-separated, e.g., '.pdf,.docx')")
-    parser.add_argument("--exclude-file-type", type=str, default=".png",
-                       help="Exclude file types (comma-separated). Default: '.png'")
+    parser.add_argument("--exclude-file-type", type=str, default=EXCLUDED_FILE_TYPES_DEFAULT,
+                       help=f"Exclude file types (comma-separated). Default: '{EXCLUDED_FILE_TYPES_DEFAULT}'")
     parser.add_argument("--filter-vendor", type=str,
                        help="Filter by vendor names (comma-separated)")
     parser.add_argument("--filter-client", type=str,
@@ -799,6 +940,11 @@ Examples:
                        help="Only include files with modified_time on/after this date/time (YYYY-MM-DD or ISO 8601)")
     parser.add_argument("--modified-before", type=str,
                        help="Only include files with modified_time on/before this date/time (YYYY-MM-DD or ISO 8601)")
+    parser.add_argument("--deal-created-after", type=str,
+                       help="Only include documents with deal_creation_date on/after this date (YYYY-MM-DD). "
+                            "Recommended: Use this instead of --modified-after for reliable date filtering.")
+    parser.add_argument("--deal-created-before", type=str,
+                       help="Only include documents with deal_creation_date on/before this date (YYYY-MM-DD)")
     parser.add_argument("--min-size-kb", type=float,
                        help="Minimum file size in KB (filters out tiny files)")
     parser.add_argument("--max-size-mb", type=float,
@@ -832,12 +978,13 @@ Examples:
     parser.add_argument(
         "--parser-backend",
         type=str,
-        choices=["pdfplumber", "docling"],
-        default="pdfplumber",
+        choices=["pdfplumber", "docling", "mistral"],
+        default="mistral",
         help=(
-            "Low-level parser backend for PDFs: "
-            "'pdfplumber' (default, existing behavior) or "
-            "'docling' (Granite Docling-based extraction with improved tables/OCR)."
+            "PDF parser backend: "
+            "'mistral' (default, Mistral OCR API - best for production) or "
+            "'docling' (Granite Docling - best for structured tables) or "
+            "'pdfplumber' (fast local baseline)."
         ),
     )
     
@@ -858,11 +1005,12 @@ Examples:
         "--docling-ocr-mode",
         type=str,
         choices=["auto", "on", "off"],
-        default="auto",
+        default="on",
         help=(
-            "Docling OCR behavior mode (default: auto). "
-            "'auto' tries non-OCR first, falls back to OCR if quality checks fail. "
-            "'on' always uses OCR. 'off' never uses OCR."
+            "Docling OCR behavior mode (default: on). "
+            "'on' always uses OCR with TableFormer ACCURATE (quality-first approach). "
+            "'off' disables OCR. "
+            "'auto' is deprecated and treated as 'on' for backward compatibility."
         ),
     )
     parser.add_argument(
@@ -891,11 +1039,31 @@ Examples:
         help="Minimum alphanumeric ratio for pass1 success in AUTO mode (default: 0.5).",
     )
     
+    # PII Redaction options
+    parser.add_argument(
+        "--enable-redaction",
+        action="store_true",
+        default=False,
+        help="Enable PII redaction stage (removes client names, people names, emails, phones, addresses before chunking).",
+    )
+    parser.add_argument(
+        "--client-redaction-csv",
+        type=str,
+        default=None,
+        help="Path to CSV file with client registry (columns: salesforce_client_id, client_name, industry_label, aliases). Required if --enable-redaction.",
+    )
+    parser.add_argument(
+        "--redaction-model",
+        type=str,
+        default=DEFAULT_REDACTION_MODEL,
+        help=f"OpenAI model for PERSON entity detection (default: {DEFAULT_REDACTION_MODEL}).",
+    )
+    
     return parser
 
 
-def main():
-    """Main entry point"""
+def main() -> None:
+    """Main entry point for document processing script."""
     parser = create_argument_parser()
     args = parser.parse_args()
     
@@ -927,9 +1095,14 @@ def main():
             exclude_file_type=args.exclude_file_type,
             modified_after=args.modified_after,
             modified_before=args.modified_before,
+            deal_created_after=args.deal_created_after,
+            deal_created_before=args.deal_created_before,
             min_size_kb=args.min_size_kb,
             max_size_mb=args.max_size_mb,
             docling_kwargs=docling_kwargs,
+            client_redaction_csv=args.client_redaction_csv,
+            redaction_model=args.redaction_model,
+            enable_redaction=args.enable_redaction,
         )
     else:
         # Serial processing (existing behavior)
