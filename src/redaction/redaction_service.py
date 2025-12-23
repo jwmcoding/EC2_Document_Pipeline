@@ -99,11 +99,12 @@ class RedactionService:
             if self.llm_span_detector:
                 try:
                     placeholder_ranges = self._find_placeholder_ranges(result.redacted_text)
-                    # Pass client context to LLM for better detection
+                    # Pass client context AND vendor context to LLM for better detection
                     all_spans = self.llm_span_detector.detect_spans(
                         result.redacted_text,
                         client_name=client_name,
-                        client_variants=generated_variants
+                        client_variants=generated_variants,
+                        vendor_name=context.vendor_name  # Pass primary vendor from deal metadata
                     )
 
                     # Filter ORG spans to only match the current client (when configured)

@@ -1,13 +1,13 @@
 # Current Metadata Fields - December 2025
 
 **Last Updated**: December 18, 2025  
-**Total Fields**: 30 base fields + 3 conditional timestamp fields = **33 max**  
+**Total Fields**: 31 base fields + 3 conditional timestamp fields = **34 max**  
 **Status**: ✅ **IMPLEMENTATION COMPLETE** - All fields extracted and mapped  
 **Source of Truth**: `src/connectors/pinecone_client.py` lines 613-663
 
 ---
 
-## 📋 Complete Field List (30 Base + 3 Conditional)
+## 📋 Complete Field List (31 Base + 3 Conditional)
 > **Note**: For reliable Pinecone date range filtering (`$gt/$gte/$lt/$lte`), use the numeric `*_ts` fields.
 
 ### Core Document (4 fields)
@@ -51,10 +51,11 @@
 | `client_name` | string | Client company name (mapped) | `deal_metadata.client_name` | ~95% |
 | `vendor_name` | string | Vendor company name (mapped) | `deal_metadata.vendor_name` | ~90% |
 
-### Deal Status & Quality (2 fields)
+### Deal Status & Quality (3 fields)
 | Field | Type | Description | Source | Population |
 |-------|------|-------------|--------|------------|
 | `deal_status` | string | Deal status ("Closed", "In Progress", etc.) | `deal_metadata.status` | 100% |
+| `deal_reason` | string | Deal reason ("New purchase", "Renewal", "Add-on", etc.) | `Deal_Reason__c` | ~95% |
 | `has_parsing_errors` | boolean | Whether parsing encountered errors | `parsing_errors` list | 100% |
 
 ### Processing Metadata (1 field)
@@ -137,23 +138,24 @@ The `text` field has been **removed from metadata** to prevent Pinecone's 40KB m
 | Financial Metrics | 6 | final_amount, savings_1yr, savings_3yr, savings_achieved, fixed_savings, savings_target_full_term |
 | Contract Information | 3 | contract_term, contract_start, contract_end |
 | Business Relationships | 2 | client_name, vendor_name |
-| Deal Status & Quality | 2 | has_parsing_errors, deal_status |
+| Deal Status & Quality | 3 | has_parsing_errors, deal_status, deal_reason |
 | Processing Metadata | 1 | chunk_index |
 | Email Metadata | 1 | email_has_attachments |
 | Deal Classification | 7 | report_type, project_type, competition, npi_analyst, dual_multi_sourcing, time_pressure, advisor_network_used |
 | Text Content | 1 | text |
-| **BASE TOTAL** | **30** | |
+| **BASE TOTAL** | **31** | |
 | Conditional Timestamps | +3 | deal_creation_date_ts, contract_start_ts, contract_end_ts |
-| **MAX TOTAL** | **33** | (when all timestamps present) |
+| **MAX TOTAL** | **34** | (when all timestamps present) |
 
 ---
 
 ## 🔍 Source Column Mapping
 
-The 8 new fields map to these Salesforce columns in `Deal__c.csv`:
+Deal classification fields map to these Salesforce columns in `Deal__c.csv`:
 
 | Pinecone Field | Salesforce Column | Notes |
 |----------------|-------------------|-------|
+| `deal_reason` | `Deal_Reason__c` | Deal reason ("New purchase", "Renewal", "Add-on", etc.) (truncate to 50 chars) |
 | `report_type` | `Report_Type__c` | Type of report delivered |
 | `description` | `Description__c` | Detailed deal description (truncate to 500 chars) |
 | `project_type` | `Project_Type__c` | Project category (truncate to 50 chars) |

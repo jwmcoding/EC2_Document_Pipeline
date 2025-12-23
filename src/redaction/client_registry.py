@@ -84,9 +84,10 @@ class ClientRegistry:
                         client_name = (row.get('Account Name') or row.get('\ufeffAccount Name') or '').strip()
                         aliases_str = (row.get('aliases') or '').strip()
                         
-                        # Generate dummy industry label (will be replaced later with real SIC codes)
-                        # Use a generic placeholder for now
-                        industry_label = f"Client Organization"  # Dummy value until SIC codes are added
+                        # Use Industry column if present, otherwise fallback to dummy
+                        industry_label = (row.get('Industry') or '').strip()
+                        if not industry_label:
+                            industry_label = f"Client Organization"  # Fallback dummy value
                     else:
                         # Standard format
                         client_id = row.get('salesforce_client_id', '').strip()
@@ -119,7 +120,11 @@ class ClientRegistry:
                 
                 self.logger.info(f"Loaded {count} clients from CSV")
                 if is_salesforce_format:
-                    self.logger.info("Using dummy industry_label='Client Organization' until SIC codes are added")
+                    industry_count = sum(1 for c in self.clients.values() if c.get('industry_label') != 'Client Organization')
+                    if industry_count > 0:
+                        self.logger.info(f"Using Industry column for {industry_count} clients (fallback to 'Client Organization' for {count - industry_count} clients)")
+                    else:
+                        self.logger.info("Using dummy industry_label='Client Organization' (Industry column not found or empty)")
         
         except Exception as e:
             self.logger.error(f"Error loading client CSV: {e}")

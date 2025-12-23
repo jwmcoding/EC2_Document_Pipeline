@@ -642,9 +642,10 @@ class PineconeDocumentClient:
                     "client_name": _sanitize_str(metadata.get("client_name"))[:100],
                     "vendor_name": _sanitize_str(metadata.get("vendor_name"))[:100],
                     
-                    # ===== QUALITY (2 fields) =====
+                    # ===== QUALITY (3 fields) =====
                     "has_parsing_errors": bool(len(metadata.get("parsing_errors", [])) > 0),
                     "deal_status": _sanitize_str(metadata.get("deal_status")),
+                    "deal_reason": _sanitize_str(metadata.get("deal_reason"))[:50],
                     
                     # ===== EMAIL (1 field) =====
                     "email_has_attachments": bool(metadata.get("email_has_attachments", False)),

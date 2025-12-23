@@ -231,6 +231,7 @@ def build_metadata_dict(doc_data: DocumentData) -> Dict[str, Any]:
         "vendor_name": deal_meta.get("vendor_name", ""),
         "deal_creation_date": business_meta.get("deal_creation_date") or deal_meta.get("deal_creation_date", ""),
         "deal_status": deal_meta.get("deal_status", ""),
+        "deal_reason": deal_meta.get("deal_reason", ""),
         
         # Contract
         "contract_start": deal_meta.get("contract_start", ""),

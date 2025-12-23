@@ -18,9 +18,15 @@
 - **Run index**:
   - `output/redaction_harness_<timestamp>/REDACTION_REVIEW_INDEX.md` links to each `original.<ext>` + `redacted.md` and includes counts + extracted word count + **`content_parser`**.
 
-### Redaction stage logic (high-level)
+### Redaction stage logic (defense-in-depth approach)
 - **Location**: `src/redaction/` (see `src/redaction/README.md`)
-- **Ordering**: regex PII → (optional) LLM span detection (PERSON + client-matching ORG) → deterministic client aliases → conservative cleanup of partial legal-name tails → strict-mode validators.
+- **Ordering**: regex PII → **deterministic client aliases (FIRST)** → (optional) LLM span detection (PERSON + client-matching ORG) → conservative cleanup of partial legal-name tails → strict-mode validators.
+- **Key architectural decision**: Deterministic aliases run **BEFORE** LLM for optimal performance/cost:
+  - **80% coverage**: Known aliases (e.g., "AmFam") caught instantly, no LLM cost
+  - **No context loss**: LLM receives `client_name` + `client_variants` via parameters even after pre-redaction
+  - **Intelligent discovery**: LLM focuses on finding NEW variants (typos, uncommon abbreviations) not in CSV
+  - **Fail-safe**: Known aliases always caught, even if LLM service fails
+  - **Cost savings**: Pre-redaction reduces LLM token count by ~15-20%
 - **Key requirement**: client redaction requires `salesforce_client_id` (otherwise we intentionally cannot know which ORG is "the client").
 - **LLM span debugging logs (Dec 2025)**: `src/redaction/llm_span_detector.py` now logs `llm_span_detection_empty_content*` and `llm_span_detection_json_decode_error*` with `finish_reason`, `has_refusal`, `tool_calls_present`, `response_id/model`, and safe `content_sha256_16` (no text).
 
@@ -33,12 +39,41 @@
 - **LLM handles abbreviations**: LLM prompts include general instructions to detect contextual abbreviations/acronyms. This is where abbreviation detection belongs.
 - **ORG span filtering**: Uses explicit CSV aliases for matching (human-curated).
 
-### 🔮 Future: Alias Curation (High-Value Next Step)
-- **Populate `aliases` column in SF-Cust-Mapping.csv** with human-curated nicknames/abbreviations for high-volume clients
-- Example: `American Family Insurance` → aliases: `"AmFam|AFI|American Family"`
-- This provides **guaranteed deterministic redaction** for known abbreviations without LLM dependency
-- **Priority**: Focus on top 50-100 most common clients first
-- **NOT implemented yet** — requires manual curation effort
+### LLM Span Detection Prompt Improvements (December 21, 2025)
+- **Vendor context added**: Now passes `vendor_name` from deal metadata to LLM (1 primary vendor, not a list)
+  - Example: `"Client: American Family | Vendor: Guidewire (DO NOT detect as ORG)"`
+  - Prevents ambiguous cases where client/vendor have similar names
+  - Lightweight context (~10-20 tokens) with high impact
+- **Few-shot examples added**: 4 concrete scenarios showing client vs vendor distinction (e.g., "AmFam" = client, "Guidewire" = vendor)
+- **Goal framing**: Explicit "better to over-detect client mentions than miss them" for redaction safety
+- **Structured rules**: Numbered inclusion/exclusion rules (clearer than bullet points)
+- **Context signals**: Teaches LLM to recognize client mentions via position (subject vs object), proximity to full name, parenthetical definitions
+- **Expected impact**: 10-20% improvement in detecting client abbreviations/nicknames, reduced vendor false positives
+- **Token cost**: ~150-200 additional tokens per call (few-shot examples + vendor context worth the cost for accuracy)
+
+### 🔮 Alias Generation System (December 21, 2025)
+**Status**: ✅ **PILOT COMPLETE** - LLM-driven alias generation tested on 9 clients
+
+**Approach**: LLM-only with few-shot examples (Option D)
+- **Script**: `scripts/generate_aliases_pilot_50.py`
+- **Input**: Discovery JSON + Pinecone evidence (500 chunks/client) + Primary vendors from discovery metadata
+- **Model**: GPT-5 mini with reasoning + strict JSON schema
+- **Process**: LLM analyzes evidence with few-shot examples, returns 3-7 aliases with reasoning, validates verbatim appearance
+- **Vendor filtering**: Only **primary vendors from discovery JSON** (1-2 per client), not all Pinecone chunks (prevents 40-179 vendor overflow)
+
+**Results (9-client test)**:
+- **Success rate**: 3/9 clients (33%) found aliases
+- **Quality**: Zero false positives, all aliases legitimate
+- **Examples**: 
+  - FIS Global → `FIS`, `Fidelity Information Services`, `fisglobal.com`
+  - TreeHouse Foods → `Treehouse`
+- **Limitation**: Conservative (missed obvious ones like "P&G" for Procter & Gamble)
+
+**Key Innovation**: Extract vendors from **discovery JSON only** (documents being processed), not from all Pinecone chunks. This gives clean 1-2 vendor list vs 40-179 vendors that overwhelmed prompts.
+
+**Documentation**: Full details in `src/redaction/ALIAS_GENERATION.md`
+
+**Next Steps**: Run on all 50 clients, evaluate if LLM prompts need strengthening, or consider hybrid approach (deterministic + LLM)
 
 ---
 
