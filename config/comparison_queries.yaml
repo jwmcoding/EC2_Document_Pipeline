@@ -1,0 +1,93 @@
+# Pinecone Comparison Test Queries
+# 
+# These queries are designed to evaluate search quality across different
+# processing pipelines and index configurations for business document intelligence.
+#
+# Categories:
+#   - Pricing & Financial: License costs, savings, payment terms
+#   - Contract Terms: Legal clauses, SLAs, renewal conditions  
+#   - Vendor-specific: Named vendor searches
+#   - Deal Context: Competitive bidding, industry, urgency
+#   - Technical: Implementation, integration, support
+#   - Real User Queries: Actual production queries from business users
+
+queries:
+  # ─────────────────────────────────────────────────────────────────────
+  # Real User Queries (Salesforce/Agentforce - Production Usage)
+  # ─────────────────────────────────────────────────────────────────────
+  
+  # Time-based Contract Queries
+  - "Salesforce contracts June 2024 December 2025 Agentforce AI automation licensing"
+  
+  # Deal Type & Pricing Queries
+  - "Salesforce new purchase renewal add-on expansion deals 2024 2025 discount pricing"
+  
+  # Adoption & Purchase Pattern Queries
+  - "Salesforce Agentforce adoption rates new purchase vs renewal add-on deals 2024 2025"
+  
+  # Product Feature & Bundling Queries
+  - "Salesforce Agentforce bundling pricing AI add-on features"
+  
+  # Strategic Negotiation Queries
+  - "Agentforce negotiation leverage competitive replacement discount strategy contracts"
+  
+  # Technical Features Queries
+  - "Salesforce AI features Flow automation data analytics enterprise negotiations"
+  # ─────────────────────────────────────────────────────────────────────
+  # Pricing & Financial Queries
+  # ─────────────────────────────────────────────────────────────────────
+  - "What are the pricing terms and payment schedules in software contracts?"
+  - "Show me license costs and annual maintenance fees"
+  - "Find contracts with savings over 1 million dollars"
+  - "What is the total cost of ownership for enterprise software?"
+  - "Show me year-over-year pricing increases"
+  - "Find deals with volume discounts or tiered pricing"
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Contract Terms & Legal Clauses
+  # ─────────────────────────────────────────────────────────────────────
+  - "What are the renewal terms and auto-renewal clauses?"
+  - "Find contracts with termination for convenience clauses"
+  - "What are the SLA and uptime guarantees?"
+  - "Show me liability caps and limitation of liability clauses"
+  - "Find contracts with data security and privacy requirements"
+  - "What are the intellectual property and ownership clauses?"
+  - "Find contracts with most favored customer provisions"
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Vendor-Specific Searches
+  # ─────────────────────────────────────────────────────────────────────
+  - "Show me Microsoft enterprise agreements and licensing terms"
+  - "Find Salesforce contracts and subscription details"
+  - "What are the Oracle licensing terms?"
+  - "Find SAP implementation contracts and support agreements"
+  - "Show me AWS and cloud infrastructure contracts"
+  - "Find ServiceNow subscription and pricing details"
+  - "What are the Workday implementation terms?"
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Deal Context & Business Intelligence
+  # ─────────────────────────────────────────────────────────────────────
+  - "Find deals with competitive bidding or multi-vendor sourcing"
+  - "Show me contracts in the healthcare industry"
+  - "What deals had time pressure or urgent timelines?"
+  - "Find deals where we achieved significant savings"
+  - "Show me renewal negotiations with major vendors"
+  - "Find contracts with implementation challenges"
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Technical & Implementation
+  # ─────────────────────────────────────────────────────────────────────
+  - "What are the integration requirements and APIs?"
+  - "Find implementation timelines and milestones"
+  - "Show me training and support provisions"
+  - "What are the data migration requirements?"
+  - "Find contracts with professional services components"
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Edge Cases (Testing recall/precision)
+  # ─────────────────────────────────────────────────────────────────────
+  - "Find FMV reports and fair market value assessments"
+  - "Show me rate cards and pricing schedules"
+  - "What benchmarking data is available?"
+
